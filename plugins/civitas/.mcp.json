@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "civitas": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "civitas.mcp_server"
+      ],
+      "env": {
+        "CIVITAS_MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}

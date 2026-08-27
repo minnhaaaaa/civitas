@@ -159,3 +159,19 @@ export type ScenarioRecord = {
   execution: ExecutionSnapshot;
   events: SseEnvelope[];
 };
+
+/**
+ * Bounded, organization-authorized projection served to the optional viewer.
+ * The organization identifier intentionally never appears in a route or UI payload.
+ */
+export type AuditViewSnapshot = {
+  run_id: string;
+  selected_plan_id: string;
+  policy_version: string;
+  title: string;
+  summary: string;
+  jury: JuryCycleSnapshot[];
+  evidence_graphs: EvidenceGraphSnapshot[];
+  execution: ExecutionSnapshot;
+  events: WorkflowEvent[];
+};

@@ -1,0 +1,34 @@
+{
+  "name": "civitas",
+  "version": "0.1.0",
+  "description": "Evidence-aware, approval-gated food procurement through Civitas MCP.",
+  "author": {
+    "name": "Civitas"
+  },
+  "license": "MIT",
+  "keywords": [
+    "procurement",
+    "mcp",
+    "evidence",
+    "approval"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Civitas Procurement",
+    "shortDescription": "Plan evidence-backed procurement with guarded execution.",
+    "longDescription": "Starts bounded procurement runs, summarizes solver and Jury results, and requires an immutable Civitas approval challenge before execution.",
+    "developerName": "Civitas",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Plan seven days of demand across our warehouses.",
+      "Check the current procurement decision and evidence.",
+      "Prepare the approved procurement plan for execution."
+    ],
+    "brandColor": "#166534"
+  }
+}

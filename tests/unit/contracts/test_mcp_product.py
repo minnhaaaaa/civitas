@@ -84,9 +84,7 @@ def test_approval_challenge_binds_the_immutable_execution_inputs() -> None:
     assert challenge.selected_plan_hash == "a" * 64
 
     with pytest.raises(ValidationError, match="expiry must be after"):
-        challenge.model_copy(
-            update={"expires_at": now}
-        ).__class__.model_validate(
+        challenge.model_copy(update={"expires_at": now}).__class__.model_validate(
             challenge.model_copy(update={"expires_at": now}).model_dump()
         )
 

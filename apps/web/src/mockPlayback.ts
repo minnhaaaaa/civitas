@@ -1,5 +1,6 @@
 import type {
   AlternativePlan,
+  AuditViewSnapshot,
   EvidenceGraphSnapshot,
   ExecutionSnapshot,
   JsonObject,
@@ -719,6 +720,21 @@ export const scenarioRecord: ScenarioRecord = {
   execution,
   events,
 };
+
+export function createMockAuditSnapshot(): AuditViewSnapshot {
+  return {
+    run_id: scenarioRecord.run_id,
+    selected_plan_id: scenarioRecord.execution.approved_plan_id,
+    policy_version: "integrity-v1",
+    title: "False consensus case file",
+    summary:
+      "A read-only record of the Jury investigation, replanning, and duplicate-protected execution.",
+    jury: scenarioRecord.jury,
+    evidence_graphs: scenarioRecord.evidenceGraphs,
+    execution: scenarioRecord.execution,
+    events: scenarioRecord.events.map((event) => event.data),
+  };
+}
 
 export class MockEventSource {
   onmessage: StreamListener | null = null;
