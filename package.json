@@ -1,0 +1,11 @@
+{
+  "name": "civitas-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.31.0",
+  "scripts": {
+    "build": "pnpm --recursive build",
+    "format": "pnpm --recursive format",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck"
+  }
+}

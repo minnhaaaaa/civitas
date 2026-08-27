@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.coverage
+.hypothesis/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+
+# Frontend
+node_modules/
+apps/web/dist/
+*.tsbuildinfo
+
+# Environment and editors
+.env
+.idea/
+.vscode/
+.DS_Store
+
+# Local database
+postgres-data/
