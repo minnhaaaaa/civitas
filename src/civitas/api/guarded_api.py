@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from collections.abc import AsyncIterator
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 from sqlalchemy import select, update
@@ -46,12 +47,12 @@ class ResumeWorkflowRequest(Contract):
 
 
 class ApprovePlanRequest(Contract):
-    execution_id: str
-    approved_plan_id: str
-    jury_evaluation_id: str
-    idempotency_key: str
-    approval_policy_version: str
-    action: dict[str, Any] = Field(default_factory=dict)
+    execution_id: str = Field(min_length=1, max_length=255)
+    approved_plan_id: str = Field(min_length=1, max_length=255)
+    jury_evaluation_id: str = Field(min_length=1, max_length=255)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    approval_policy_version: str = Field(min_length=1, max_length=64)
+    action: dict[str, Any] = Field(default_factory=dict, max_length=50)
 
 
 class WorkflowStateResponse(Contract):
@@ -89,31 +90,30 @@ class WorkflowStore:
         checkpoint: WorkflowCheckpoint,
         events: tuple[WorkflowEvent, ...],
     ) -> None:
-        async with self._sessions() as session:
-            async with session.begin():
-                for event in events:
-                    session.add(
-                        WorkflowEventModel(
-                            id=event.event_id,
-                            planning_run_id=event.planning_run_id,
-                            sequence=event.sequence,
-                            event_type=event.event_type.value,
-                            occurred_at=event.occurred_at,
-                            actor_id=event.actor_id,
-                            correlation_id=event.correlation_id,
-                            causation_id=event.causation_id,
-                            schema_version=event.schema_version,
-                            payload={
-                                "event": event.payload,
-                                "checkpoint": checkpoint.model_dump(mode="json"),
-                            },
-                        )
+        async with self._sessions() as session, session.begin():
+            for event in events:
+                session.add(
+                    WorkflowEventModel(
+                        id=event.event_id,
+                        planning_run_id=event.planning_run_id,
+                        sequence=event.sequence,
+                        event_type=event.event_type.value,
+                        occurred_at=event.occurred_at,
+                        actor_id=event.actor_id,
+                        correlation_id=event.correlation_id,
+                        causation_id=event.causation_id,
+                        schema_version=event.schema_version,
+                        payload={
+                            "event": event.payload,
+                            "checkpoint": checkpoint.model_dump(mode="json"),
+                        },
                     )
-                await session.execute(
-                    update(PlanningRunModel)
-                    .where(PlanningRunModel.id == checkpoint.planning_run_id)
-                    .values(status=checkpoint.final_state or checkpoint.phase.value)
                 )
+            await session.execute(
+                update(PlanningRunModel)
+                .where(PlanningRunModel.id == checkpoint.planning_run_id)
+                .values(status=checkpoint.final_state or checkpoint.phase.value)
+            )
 
     async def latest_checkpoint(self, planning_run_id: str) -> WorkflowCheckpoint | None:
         async with self._sessions() as session:
@@ -166,6 +166,18 @@ class WorkflowStore:
             )
         return tuple(parsed)
 
+    async def require_organization(self, planning_run_id: str, organization_id: str) -> None:
+        async with self._sessions() as session:
+            owner = await session.scalar(
+                select(PlanningRunModel.organization_id).where(
+                    PlanningRunModel.id == planning_run_id
+                )
+            )
+        if owner is None:
+            raise ValueError("workflow not found")
+        if owner != organization_id:
+            raise PermissionError("planning run belongs to another organization")
+
 
 class WorkflowAPIService:
     def __init__(
@@ -176,6 +188,9 @@ class WorkflowAPIService:
     ) -> None:
         self._workflow = workflow
         self._store = store
+
+    async def require_organization(self, planning_run_id: str, organization_id: str) -> None:
+        await self._store.require_organization(planning_run_id, organization_id)
 
     async def start(self, request: StartWorkflowRequest) -> WorkflowCheckpoint:
         planning_run_id = request.planning_run_id
@@ -234,8 +249,6 @@ class WorkflowAPIService:
             checkpoint, events = await self._workflow.advance(checkpoint, limits=limits)
             if events:
                 await self._store.append(checkpoint, events)
-            if mode is RunMode.INITIALIZE_ONLY:
-                break
         return checkpoint
 
 
@@ -247,14 +260,44 @@ def create_guarded_app(
     *,
     workflow_service: WorkflowAPIService,
     execution_service: ExecutionAPI,
+    api_token: str,
+    organization_id: str,
 ) -> FastAPI:
-    app = FastAPI(title="Civitas Guarded API")
+    if len(api_token) < 32:
+        raise ValueError("api_token must contain at least 32 characters")
+    if not organization_id.strip():
+        raise ValueError("organization_id must not be empty")
+
+    async def authenticate(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        scheme, _, credential = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not secrets.compare_digest(credential, api_token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    app = FastAPI(
+        title="Civitas Guarded API",
+        dependencies=[Depends(authenticate)],
+    )
+
+    async def authorize_run(planning_run_id: str) -> None:
+        try:
+            await workflow_service.require_organization(planning_run_id, organization_id)
+        except PermissionError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.post("/planning-runs/{planning_run_id}/start")
     async def start_workflow(
         planning_run_id: str,
         request: StartWorkflowRequest,
     ) -> JSONResponse:
+        await authorize_run(planning_run_id)
         try:
             checkpoint = await workflow_service.start(
                 request.model_copy(update={"planning_run_id": planning_run_id})
@@ -264,7 +307,10 @@ def create_guarded_app(
         return JSONResponse(checkpoint.model_dump(mode="json"))
 
     @app.get("/planning-runs/{planning_run_id}")
-    async def inspect_workflow(planning_run_id: str) -> JSONResponse:
+    async def inspect_workflow(
+        planning_run_id: str,
+    ) -> JSONResponse:
+        await authorize_run(planning_run_id)
         try:
             state = await workflow_service.inspect(planning_run_id)
         except ValueError as error:
@@ -276,6 +322,7 @@ def create_guarded_app(
         planning_run_id: str,
         request: ResumeWorkflowRequest,
     ) -> JSONResponse:
+        await authorize_run(planning_run_id)
         try:
             checkpoint = await workflow_service.resume(planning_run_id, request)
         except ValueError as error:
@@ -287,25 +334,36 @@ def create_guarded_app(
         planning_run_id: str,
         request: ApprovePlanRequest,
     ) -> JSONResponse:
-        outcome = await execution_service.execute(
-            ExecutionRequest(
-                execution_id=request.execution_id,
-                planning_run_id=planning_run_id,
-                approved_plan_id=request.approved_plan_id,
-                jury_evaluation_id=request.jury_evaluation_id,
-                idempotency_key=request.idempotency_key,
-                approval_policy_version=request.approval_policy_version,
-                requested_at=datetime.now().astimezone(),
-                action=request.action,
+        await authorize_run(planning_run_id)
+        try:
+            outcome = await execution_service.execute(
+                ExecutionRequest(
+                    execution_id=request.execution_id,
+                    planning_run_id=planning_run_id,
+                    approved_plan_id=request.approved_plan_id,
+                    jury_evaluation_id=request.jury_evaluation_id,
+                    idempotency_key=request.idempotency_key,
+                    approval_policy_version=request.approval_policy_version,
+                    requested_at=datetime.now().astimezone(),
+                    action=request.action,
+                )
             )
-        )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         return JSONResponse(outcome.model_dump(mode="json"))
 
     @app.get("/planning-runs/{planning_run_id}/stream")
     async def stream_workflow(
         planning_run_id: str,
         cursor: int = Query(default=0, ge=0),
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
     ) -> StreamingResponse:
+        await authorize_run(planning_run_id)
+        if last_event_id is not None:
+            try:
+                cursor = max(cursor, int(last_event_id))
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail="invalid Last-Event-ID") from error
         return StreamingResponse(
             workflow_service.stream_payloads(planning_run_id, cursor=cursor),
             media_type="text/event-stream",

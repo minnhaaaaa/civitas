@@ -33,7 +33,7 @@ class MetricPreference:
     maximize: bool
 
 
-def default_role_agents() -> tuple["RoleAgent", ...]:
+def default_role_agents() -> tuple[RoleAgent, ...]:
     return (
         RoleAgent(
             role=ParliamentRole.DEMAND,
@@ -102,6 +102,8 @@ class RoleAgent:
         preferred = ordered[0]
         acceptable = tuple(item.plan_id for item in ordered if item.score == preferred.score)
         annotations = context.plan_annotations.get(preferred.plan_id, {})
+        if not isinstance(annotations, dict):
+            annotations = {}
         return ParliamentProposal(
             role=self.role.value,
             preferred_plan_id=preferred.plan_id,
@@ -123,7 +125,10 @@ class RoleAgent:
         own = next(item for item in proposals if item.role == self.role.value)
         challenges: list[ParliamentChallenge] = []
         for proposal in proposals:
-            if proposal.role == self.role.value or proposal.preferred_plan_id in own.acceptable_plan_ids:
+            if (
+                proposal.role == self.role.value
+                or proposal.preferred_plan_id in own.acceptable_plan_ids
+            ):
                 continue
             challenges.append(
                 ParliamentChallenge(
@@ -168,7 +173,7 @@ class RoleAgent:
         score = Decimal("0")
         reasons: list[str] = []
         weight = Decimal(len(self._preferences)) or Decimal("1")
-        for index, pref in enumerate(self._preferences, start=1):
+        for pref in self._preferences:
             raw = Decimal(plan.metrics.get(pref.name, Decimal("0")))
             direction = Decimal("1") if pref.maximize else Decimal("-1")
             score += direction * raw / weight
@@ -193,7 +198,9 @@ def select_consensus_plan(
     concessions: Sequence[ParliamentConcession],
 ) -> str:
     plan_ids = {plan.plan_id for plan in optimization_result.alternatives}
-    effective_votes = [proposal.preferred_plan_id for proposal in proposals if proposal.preferred_plan_id]
+    effective_votes = [
+        proposal.preferred_plan_id for proposal in proposals if proposal.preferred_plan_id
+    ]
     for concession in concessions:
         if concession.to_plan_id in plan_ids:
             effective_votes.append(concession.to_plan_id)
@@ -223,7 +230,9 @@ def support_counts(
     concessions: Sequence[ParliamentConcession] = (),
 ) -> dict[str, int]:
     counts = Counter(
-        proposal.preferred_plan_id for proposal in proposals if proposal.preferred_plan_id is not None
+        proposal.preferred_plan_id
+        for proposal in proposals
+        if proposal.preferred_plan_id is not None
     )
     counts.update(concession.to_plan_id for concession in concessions)
     return dict(counts)

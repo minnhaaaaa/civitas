@@ -21,7 +21,9 @@ def test_system_visible_fixtures_do_not_expose_hidden_truth() -> None:
         visible_claim_ids = {item.claim_id for item in scenario.visible.jury_inputs.claims}
         visible_evidence_ids = {item.evidence_id for item in scenario.visible.jury_inputs.evidence}
         hidden_claim_ids = {item.claim_id for item in scenario.true_world_state.hidden_claims}
-        hidden_evidence_ids = {item.evidence_id for item in scenario.true_world_state.hidden_evidence}
+        hidden_evidence_ids = {
+            item.evidence_id for item in scenario.true_world_state.hidden_evidence
+        }
 
         assert visible_claim_ids.isdisjoint(hidden_claim_ids)
         assert visible_evidence_ids.isdisjoint(hidden_evidence_ids)

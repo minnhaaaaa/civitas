@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
-  Controls,
   MarkerType,
   ReactFlow,
   type Edge,
@@ -16,24 +15,34 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import "@xyflow/react/dist/style.css";
 
 import type {
-  AlternativePlan,
   EvidenceGraphNodeData,
   EvidenceGraphSnapshot,
-  ExecutionStep,
-  IntegrityComponents,
   JuryCycleSnapshot,
   ScenarioSummary,
   WorkflowEvent,
 } from "./contracts";
 import { createMockRunStream, getPlaybackCycle, scenarioRecord } from "./mockPlayback";
 
-gsap.registerPlugin(ScrollTrigger, useGSAP);
+gsap.registerPlugin(useGSAP, ScrollTrigger);
+
+const STORY_CHAPTERS = ["Consensus", "Lineage", "Dissent", "Replan"] as const;
+const WORKFLOW_EVENT_TYPES = [
+  "run.started",
+  "task.started",
+  "task.completed",
+  "evidence.recorded",
+  "proposal.created",
+  "jury.evaluated",
+  "investigation.requested",
+  "execution.updated",
+  "run.completed",
+] as const;
 
 function labelForEvent(eventType: string): string {
   return eventType.replaceAll(".", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function formatClock(isoTimestamp: string) {
+function formatClock(isoTimestamp: string): string {
   return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
@@ -54,113 +63,35 @@ function juryForCycle(cycle: number): JuryCycleSnapshot {
   return scenarioRecord.jury.find((item) => item.cycle === cycle) ?? scenarioRecord.jury[0]!;
 }
 
-function executionProgress(events: WorkflowEvent[]) {
-  const executionEvents = events.filter((event) => event.event_type === "execution.updated");
-  if (executionEvents.length === 0) {
-    return 1;
-  }
-  return Math.min(4, executionEvents.length + 2);
-}
-
-function alternativeState(plan: AlternativePlan, cycle: number) {
-  if (plan.selected_in_cycle === null) {
-    return plan.status;
-  }
-  if (cycle < plan.selected_in_cycle) {
-    return "standby";
-  }
-  return plan.status;
-}
-
-function componentEntries(components: IntegrityComponents) {
-  return [
-    { key: "critical_claim_coverage", label: "Coverage", value: components.critical_claim_coverage },
-    { key: "evidence_independence", label: "Independence", value: components.evidence_independence },
-    { key: "provenance_completeness", label: "Provenance", value: components.provenance_completeness },
-    { key: "evidence_freshness", label: "Freshness", value: components.evidence_freshness },
-    { key: "canonical_source_diversity", label: "Source diversity", value: components.canonical_source_diversity },
-    { key: "contradiction_resolution", label: "Contradictions", value: components.contradiction_resolution },
-    { key: "dissent_robustness", label: "Dissent", value: components.dissent_robustness },
-  ];
-}
-
-function nodeClassName(node: Node<EvidenceGraphNodeData>) {
+function nodeClassName(node: Node<EvidenceGraphNodeData>): string {
   const classes = ["graph-node", `graph-node-${node.data.kind}`];
-  if (node.data.shared) {
-    classes.push("is-shared");
-  }
-  if (node.data.cleanRoom) {
-    classes.push("is-clean-room");
-  }
-  if (node.data.contradicted) {
-    classes.push("is-contradicted");
-  }
+  if (node.data.shared) classes.push("is-shared");
+  if (node.data.cleanRoom) classes.push("is-clean-room");
+  if (node.data.contradicted) classes.push("is-contradicted");
   return classes.join(" ");
 }
 
 function EvidenceNode({ data }: NodeProps<Node<EvidenceGraphNodeData>>) {
   return (
-    <div>
-      <p className="graph-node-label">{data.label}</p>
-      <p className="graph-node-detail">{data.detail}</p>
+    <div className="graph-node__content">
+      <span>{data.kind}</span>
+      <strong>{data.label}</strong>
+      <small>{data.detail}</small>
     </div>
   );
 }
 
-const nodeTypes: NodeTypes = {
-  evidenceNode: EvidenceNode,
-};
+const nodeTypes: NodeTypes = { evidenceNode: EvidenceNode };
 
-function statusTone(value: string) {
-  if (value === "approve" || value === "approved" || value === "succeeded" || value === "fresh") {
-    return "is-positive";
-  }
-  if (value === "investigate" || value === "warning" || value === "standby") {
-    return "is-warning";
-  }
-  if (value === "duplicate") {
-    return "is-neutral";
-  }
-  return "is-critical";
-}
-
-function ExecutionRail({ steps, progress }: { steps: ExecutionStep[]; progress: number }) {
-  return (
-    <ol className="execution-rail">
-      {steps.map((step, index) => {
-        const active = index < progress;
-        return (
-          <li key={step.label} className={`execution-step ${active ? "is-active" : ""}`}>
-            <div className="execution-step-index">{String(index + 1).padStart(2, "0")}</div>
-            <div>
-              <div className="execution-step-head">
-                <p>{step.label}</p>
-                <span className={`tone-chip ${statusTone(step.state)}`}>{step.state.replaceAll("_", " ")}</span>
-              </div>
-              <p className="muted-copy">{step.detail}</p>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-type DemoScenarioResponse = {
-  scenarios: ScenarioSummary[];
-};
-
-type DemoRunResponse = {
-  run_id: string;
-  scenario_id: string;
-  status: string;
-  stream_url: string;
-};
-
+type DemoScenarioResponse = { scenarios: ScenarioSummary[] };
+type DemoRunResponse = { run_id: string; scenario_id: string; status: string; stream_url: string };
 type EventSourceLike = {
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: Event) => void) | null;
-  addEventListener(type: string, listener: ((event: { data: WorkflowEvent }) => void) | EventListenerOrEventListenerObject): void;
+  addEventListener(
+    type: string,
+    listener: ((event: { data: WorkflowEvent }) => void) | EventListenerOrEventListenerObject,
+  ): void;
   close(): void;
 };
 
@@ -173,14 +104,14 @@ export function App() {
   ]);
   const [selectedScenarioId, setSelectedScenarioId] = useState(scenarioRecord.scenario.scenario_id);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const rootRef = useRef<HTMLElement | null>(null);
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const storyRef = useRef<HTMLElement | null>(null);
   const streamRef = useRef<EventSourceLike | null>(null);
 
   const currentCycle = useMemo(() => getPlaybackCycle(events), [events]);
   const currentJury = useMemo(() => juryForCycle(currentCycle), [currentCycle]);
   const currentGraph = useMemo(() => graphForCycle(currentCycle), [currentCycle]);
-  const visibleEventIds = useMemo(() => new Set(events.map((event) => event.payload.evidence_id).filter(Boolean)), [events]);
-  const executionStepProgress = useMemo(() => executionProgress(events), [events]);
   const latestEvent = events.at(-1) ?? null;
   const hasStarted = events.length > 0;
   const selectedScenario =
@@ -196,7 +127,6 @@ export function App() {
       })),
     [currentGraph],
   );
-
   const graphEdges = useMemo<Edge[]>(
     () =>
       currentGraph.edges.map((edge) => ({
@@ -213,13 +143,10 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadScenarios() {
       try {
         const response = await fetch("/api/demo-scenarios");
-        if (!response.ok) {
-          throw new Error(`Scenario request failed with ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Scenario request failed with ${response.status}`);
         const payload = (await response.json()) as DemoScenarioResponse;
         if (!cancelled && payload.scenarios.length > 0) {
           setAvailableScenarios(payload.scenarios);
@@ -227,40 +154,46 @@ export function App() {
           setPlaybackMode("live");
         }
       } catch {
-        if (!cancelled) {
-          setPlaybackMode("mock");
-        }
+        if (!cancelled) setPlaybackMode("mock");
       }
     }
-
     void loadScenarios();
     return () => {
       cancelled = true;
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void document.fonts.ready.then(() => {
+      if (active) ScrollTrigger.refresh();
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentCycle]);
+
   function attachStream(source: EventSourceLike) {
     streamRef.current = source;
-
-    source.onmessage = (message) => {
-      const event = JSON.parse(message.data) as WorkflowEvent;
+    const ingest = (message: { data: string | WorkflowEvent }) => {
+      const event =
+        typeof message.data === "string"
+          ? (JSON.parse(message.data) as WorkflowEvent)
+          : message.data;
       startTransition(() => {
-        setEvents((current) => {
-          if (current.some((item) => item.sequence === event.sequence)) {
-            return current;
-          }
-          return [...current, event];
-        });
+        setEvents((current) =>
+          current.some((item) => item.sequence === event.sequence) ? current : [...current, event],
+        );
       });
     };
-
+    source.onmessage = ingest;
+    WORKFLOW_EVENT_TYPES.forEach((eventType) => source.addEventListener(eventType, ingest));
     source.addEventListener("run.completed", () => {
       setIsPlaying(false);
       source.close();
     });
-
     source.onerror = () => {
-      setStreamError("The event stream terminated unexpectedly.");
+      setStreamError("The live stream stopped. Start the story again to reconnect.");
       setIsPlaying(false);
       source.close();
     };
@@ -279,11 +212,10 @@ export function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ scenario_id: selectedScenarioId }),
         });
-        if (!response.ok) {
-          throw new Error(`Run creation failed with ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Run creation failed with ${response.status}`);
         const payload = (await response.json()) as DemoRunResponse;
         attachStream(new EventSource(payload.stream_url));
+        document.getElementById("story")?.scrollIntoView({ behavior: "smooth" });
         return;
       } catch {
         setPlaybackMode("mock");
@@ -293,446 +225,455 @@ export function App() {
     const { source } = createMockRunStream(850);
     attachStream(source);
     source.play();
+    document.getElementById("story")?.scrollIntoView({ behavior: "smooth" });
   }
 
   useGSAP(
     () => {
-      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (reduceMotion) {
-        return;
-      }
+      const media = gsap.matchMedia();
+      media.add(
+        { desktop: "(min-width: 901px)", reduceMotion: "(prefers-reduced-motion: reduce)" },
+        (context) => {
+          const { desktop, reduceMotion } = context.conditions as {
+            desktop: boolean;
+            reduceMotion: boolean;
+          };
 
-      gsap.from(".hero-title-line", {
-        yPercent: 110,
-        opacity: 0,
-        duration: 1,
-        stagger: 0.12,
-        ease: "power4.out",
-      });
+          if (!reduceMotion) {
+            const intro = gsap.timeline({ defaults: { ease: "power3.out" } });
+            intro
+              .from(".site-header", { y: -18, duration: 0.55 })
+              .from(".hero__kicker", { y: 16, duration: 0.45 }, "-=0.2")
+              .from(
+                ".hero__line",
+                { yPercent: 70, rotation: 2, stagger: 0.12, duration: 0.9 },
+                "-=0.2",
+              )
+              .from(".hero__aside", { y: 18, duration: 0.55 }, "-=0.45")
+              .from(".hero-orbit", { scale: 0.82, duration: 0.8 }, "-=0.55");
 
-      gsap.from(".hero-stamp", {
-        rotate: -12,
-        scale: 0.85,
-        opacity: 0,
-        duration: 0.8,
-        delay: 0.35,
-        ease: "power3.out",
-      });
+            gsap.to(".hero-orbit__ring", { rotation: 48, duration: 4, ease: "power1.out" });
 
-      gsap.to(".orbital-ring", {
-        rotate: 360,
-        repeat: -1,
-        duration: 24,
-        ease: "none",
-        transformOrigin: "50% 50%",
-      });
+            gsap.utils.toArray<HTMLElement>(".reveal").forEach((element) => {
+              gsap.from(element, {
+                autoAlpha: 0,
+                y: 54,
+                duration: 0.85,
+                ease: "power3.out",
+                scrollTrigger: {
+                  trigger: element,
+                  start: "clamp(top 86%)",
+                  toggleActions: "play none none reverse",
+                },
+              });
+            });
+          }
 
-      gsap.utils.toArray<HTMLElement>(".reveal-panel").forEach((panel, index) => {
-        gsap.from(panel, {
-          y: 56,
-          opacity: 0,
-          duration: 0.9,
-          ease: "power3.out",
-          scrollTrigger: {
-            trigger: panel,
-            start: "top 86%",
-            once: true,
-            id: `panel-${index}`,
-          },
-        });
-      });
-
-      gsap.to(".hero-visual-track", {
-        yPercent: -18,
-        ease: "none",
-        scrollTrigger: {
-          trigger: ".hero-stage",
-          start: "top top",
-          end: "bottom top",
-          scrub: 0.8,
-          id: "hero-parallax",
+          if (desktop && !reduceMotion && storyRef.current) {
+            const track = storyRef.current.querySelector<HTMLElement>(".story-track");
+            if (track) {
+              gsap.to(track, {
+                xPercent: -75,
+                ease: "none",
+                scrollTrigger: {
+                  id: "civitas-story",
+                  trigger: storyRef.current,
+                  start: "top top",
+                  end: "+=3600",
+                  pin: true,
+                  scrub: 0.8,
+                  invalidateOnRefresh: true,
+                },
+              });
+              gsap.to(".story-progress__fill", {
+                scaleX: 1,
+                transformOrigin: "left center",
+                ease: "none",
+                scrollTrigger: {
+                  trigger: storyRef.current,
+                  start: "top top",
+                  end: "+=3600",
+                  scrub: 0.8,
+                },
+              });
+              gsap.to(".consensus-core", {
+                scale: 0.76,
+                rotation: -7,
+                autoAlpha: 0.24,
+                ease: "none",
+                scrollTrigger: {
+                  trigger: storyRef.current,
+                  start: "top top",
+                  end: "+=900",
+                  scrub: true,
+                },
+              });
+            }
+          }
         },
-      });
-
-      gsap.utils.toArray<HTMLElement>(".metric-fill").forEach((bar, index) => {
-        const value = Number(bar.dataset.value ?? "0");
-        gsap.fromTo(
-          bar,
-          { scaleX: 0 },
-          {
-            scaleX: value / 100,
-            duration: 1,
-            ease: "power2.out",
-            scrollTrigger: {
-              trigger: bar,
-              start: "top 92%",
-              once: true,
-              id: `metric-${index}`,
-            },
-          },
-        );
-      });
+      );
+      return () => media.revert();
     },
     { scope: rootRef },
   );
 
   return (
-    <main className="page-shell" ref={rootRef}>
-      <section className="hero-stage">
-        <div className="ambient-grid" aria-hidden="true" />
-        <div className="hero-layout">
-          <div className="hero-copy">
-            <p className="utility-kicker">
-              Agent 9 · End-to-End Integration ·{" "}
-              {playbackMode === "live" ? "FastAPI/SSE" : "Mock fallback"}
+    <div className="experience" ref={rootRef}>
+      <a className="skip-link" href="#main">
+        Skip to Story
+      </a>
+
+      <header className="site-header">
+        <a className="wordmark" href="#top" translate="no" aria-label="Civitas Home">
+          <span className="wordmark__seal" aria-hidden="true">
+            C
+          </span>
+          <span>Civitas</span>
+        </a>
+        <nav className="site-nav" aria-label="Main Navigation">
+          <a href="#story">Story</a>
+          <a href="#evidence">Evidence</a>
+          <a href="#execution">Execution</a>
+        </nav>
+        <span className={`live-mark ${isPlaying ? "is-running" : ""}`} aria-live="polite">
+          <i aria-hidden="true" />
+          {isPlaying ? "Live" : playbackMode === "live" ? "API Ready" : "Replay Ready"}
+        </span>
+      </header>
+
+      <main id="main">
+        <section className="hero" id="top">
+          <div className="hero__copy">
+            <p className="hero__kicker">Autonomous Procurement / Decision Integrity</p>
+            <h1>
+              <span className="hero__line">Agreement</span>
+              <span className="hero__line hero__line--shift">Is Not</span>
+              <span className="hero__line hero__line--outline">Evidence.</span>
+            </h1>
+          </div>
+
+          <div className="hero__aside">
+            <p>{selectedScenario.description}</p>
+            <div className="run-control">
+              <label htmlFor="scenario-select">Choose Scenario</label>
+              <select
+                id="scenario-select"
+                name="scenario"
+                value={selectedScenarioId}
+                onChange={(event) => setSelectedScenarioId(event.target.value)}
+                disabled={isPlaying}
+                autoComplete="off"
+              >
+                {availableScenarios.map((scenario) => (
+                  <option key={scenario.scenario_id} value={scenario.scenario_id}>
+                    {scenario.title}
+                  </option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void startPlayback()} disabled={isPlaying}>
+                <span>{isPlaying ? "Running…" : "Run the Story"}</span>
+                <span aria-hidden="true">↘</span>
+              </button>
+            </div>
+            <p className="run-status" aria-live="polite">
+              {latestEvent ? labelForEvent(latestEvent.event_type) : "Waiting for a run"}
             </p>
-            <div className="hero-title-lockup" aria-labelledby="page-title">
-              <span className="hero-title-line">CIVITAS</span>
-              <span className="hero-title-line hero-title-offset">JURY</span>
-              <span className="hero-script">for autonomous food procurement</span>
-              <span className="hero-stamp">AGENT</span>
+            {streamError ? (
+              <p className="stream-error" role="status">
+                {streamError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="hero-orbit" aria-hidden="true">
+            <div className="hero-orbit__ring">
+              {scenarioRecord.parliament.map((agent, index) => (
+                <i key={agent.agent_id} style={{ "--i": index } as React.CSSProperties} />
+              ))}
             </div>
-            <h1 id="page-title">{scenarioRecord.procurement_goal.thesis}</h1>
-            <p className="hero-summary">
-              Recorded workflow events drive the entire interface. Parliament, solver alternatives,
-              Jury integrity, evidence lineage, replanning, and execution status all update from the
-              same typed mock stream.
-            </p>
-          </div>
-
-          <div className="hero-visual-track">
-            <div className="hero-command-board">
-              <div className="orbital-ring">
-                <span>Problem statement five · evidence lineage · clean-room dissent · </span>
-              </div>
-              <div className="hero-goal-card">
-                <p className="panel-kicker">Procurement Goal</p>
-                <h2>{scenarioRecord.procurement_goal.title}</h2>
-                <p>{scenarioRecord.procurement_goal.demandWindow}</p>
-                <dl>
-                  <div>
-                    <dt>Warehouses</dt>
-                    <dd>{scenarioRecord.procurement_goal.warehouses.join(", ")}</dd>
-                  </div>
-                  <div>
-                    <dt>Suppliers</dt>
-                    <dd>{scenarioRecord.procurement_goal.suppliers.join(", ")}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              <div className="hero-run-card">
-                <div className="hero-run-head">
-                  <div>
-                    <p className="panel-kicker">Run Control</p>
-                    <h3>{selectedScenario.title}</h3>
-                  </div>
-                  <span className={`tone-chip ${hasStarted ? statusTone(currentJury.state) : "is-neutral"}`}>
-                    {hasStarted ? currentJury.state : "idle"}
-                  </span>
-                </div>
-                <p className="muted-copy">{selectedScenario.description}</p>
-                <div className="hero-actions">
-                  <label className="visually-hidden" htmlFor="scenario-select">
-                    Scenario
-                  </label>
-                  <select
-                    id="scenario-select"
-                    className="scenario-select"
-                    value={selectedScenarioId}
-                    onChange={(event) => setSelectedScenarioId(event.target.value)}
-                    disabled={isPlaying}
-                  >
-                    {availableScenarios.map((scenario) => (
-                      <option key={scenario.scenario_id} value={scenario.scenario_id}>
-                        {scenario.title}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="launch-button" onClick={() => void startPlayback()} disabled={isPlaying}>
-                    {isPlaying
-                      ? playbackMode === "live"
-                        ? "Streaming live run"
-                        : "Streaming recorded run"
-                      : hasStarted
-                        ? playbackMode === "live"
-                          ? "Run again"
-                          : "Replay recorded run"
-                        : playbackMode === "live"
-                          ? "Start live run"
-                          : "Start recorded run"}
-                  </button>
-                  <div className="playback-meta">
-                    <span className="tone-chip is-neutral">{playbackMode}</span>
-                    <span className="tone-chip is-neutral">{events.length}/{scenarioRecord.events.length} events</span>
-                  </div>
-                </div>
-                {streamError ? <p className="message-critical">{streamError}</p> : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="reveal-panel status-ribbon" aria-label="Run status">
-        <article>
-          <p className="panel-kicker">Current cycle</p>
-          <strong>{hasStarted ? currentCycle : 0}</strong>
-        </article>
-        <article>
-          <p className="panel-kicker">Latest event</p>
-          <strong>{latestEvent ? labelForEvent(latestEvent.event_type) : "Awaiting playback"}</strong>
-        </article>
-        <article>
-          <p className="panel-kicker">Integrity score</p>
-          <strong>{hasStarted ? currentJury.integrity_score : 0}</strong>
-        </article>
-        <article>
-          <p className="panel-kicker">Execution state</p>
-          <strong>{hasStarted ? scenarioRecord.execution.current_state.replaceAll("_", " ") : "pending"}</strong>
-        </article>
-      </section>
-
-      <section className="section-grid reveal-panel">
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Live Parliament</p>
-              <h2>Consensus is visible. Dependency is visible too.</h2>
-            </div>
-            <p className="muted-copy">Shared-source reliance is marked in sand. Agent echoes are flagged separately.</p>
-          </div>
-          <div className="agent-grid">
-            {scenarioRecord.parliament.map((agent) => (
-              <article key={agent.agent_id} className={`agent-card ${agent.uses_shared_source ? "is-shared" : ""}`}>
-                <div className="agent-head">
-                  <div>
-                    <p className="panel-kicker">{agent.label}</p>
-                    <h3>{agent.supplier}</h3>
-                  </div>
-                  <span className={`tone-chip ${agent.uses_shared_source ? "is-warning" : "is-positive"}`}>
-                    {agent.quantity} units
-                  </span>
-                </div>
-                <p>{agent.stance}</p>
-                <p className="muted-copy">{agent.objective}</p>
-                <div className="agent-tags">
-                  {agent.uses_shared_source ? <span className="micro-tag is-shared">shared source</span> : null}
-                  {agent.agent_echo ? <span className="micro-tag is-echo">agent echo</span> : null}
-                  <span className="micro-tag">{agent.evidence_ids.length} evidence links</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </article>
-
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Solver Alternatives</p>
-              <h2>Parliament compares validated plans, not invented quantities.</h2>
-            </div>
-          </div>
-          <div className="alternative-list">
-            {scenarioRecord.alternatives.map((plan) => {
-              const state = alternativeState(plan, currentCycle);
-              return (
-                <article key={plan.plan_id} className={`alternative-card is-${state}`}>
-                  <div className="alternative-head">
-                    <div>
-                      <p className="panel-kicker">{plan.label}</p>
-                      <h3>{plan.supplier_mix}</h3>
-                    </div>
-                    <span className={`tone-chip ${statusTone(state)}`}>{state.replaceAll("_", " ")}</span>
-                  </div>
-                  <div className="mini-metrics">
-                    <div>
-                      <span>Fulfillment</span>
-                      <strong>{plan.fulfillment}%</strong>
-                    </div>
-                    <div>
-                      <span>Landed cost</span>
-                      <strong>${plan.landed_cost}</strong>
-                    </div>
-                    <div>
-                      <span>Supplier risk</span>
-                      <strong>{plan.supplier_risk}</strong>
-                    </div>
-                    <div>
-                      <span>Max regret</span>
-                      <strong>{plan.max_role_regret}</strong>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </article>
-      </section>
-
-      <section className="section-grid reveal-panel">
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Jury Integrity</p>
-              <h2>Components and gates are separate on purpose.</h2>
-            </div>
-            <div className="jury-score">
-              <strong>{currentJury.integrity_score}</strong>
-              <span className={`tone-chip ${statusTone(currentJury.state)}`}>{currentJury.state}</span>
-            </div>
-          </div>
-          <p className="muted-copy">{currentJury.summary}</p>
-          <div className="integrity-grid">
-            {componentEntries(currentJury.components).map((component) => (
-              <article key={component.key} className="metric-card">
-                <div className="metric-head">
-                  <span>{component.label}</span>
-                  <strong>{component.value}</strong>
-                </div>
-                <div className="metric-bar">
-                  <span className="metric-fill" data-value={component.value} />
-                </div>
-              </article>
-            ))}
-          </div>
-        </article>
-
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Hard Gates</p>
-              <h2>Failed gates stop execution even when scores rise.</h2>
-            </div>
-          </div>
-          <div className="gate-list">
-            {currentJury.gates.map((gate) => (
-              <article key={gate.gate_code} className={`gate-card ${gate.passed ? "is-passed" : "is-failed"}`}>
-                <div className="gate-head">
-                  <h3>{gate.gate_code.replaceAll("-", " ")}</h3>
-                  <span className={`tone-chip ${gate.passed ? "is-positive" : "is-critical"}`}>
-                    {gate.passed ? "passed" : "failed"}
-                  </span>
-                </div>
-                <p className="muted-copy">
-                  {gate.reason_codes.length > 0 ? gate.reason_codes.join(" · ") : "No blocking reason codes."}
-                </p>
-              </article>
-            ))}
-          </div>
-          <div className="investigation-card">
-            <p className="panel-kicker">Required investigation</p>
-            {currentJury.required_investigation.length > 0 ? (
-              currentJury.required_investigation.map((item) => <p key={item}>{item}</p>)
-            ) : (
-              <p>No additional investigation is required in the current cycle.</p>
-            )}
-          </div>
-        </article>
-      </section>
-
-      <section className="surface-card reveal-panel">
-        <div className="section-heading">
-          <div>
-            <p className="utility-kicker">Evidence Graph</p>
-            <h2>Shared source groups and clean-room dissent are structurally distinct.</h2>
-          </div>
-          <div className="graph-legend">
-            <span className="micro-tag is-shared">shared support</span>
-            <span className="micro-tag is-clean-room">clean room</span>
-            <span className="micro-tag is-contradiction">contradiction</span>
-          </div>
-        </div>
-        <div className="graph-shell">
-          <ReactFlow
-            fitView
-            nodes={graphNodes}
-            edges={graphEdges}
-            nodeTypes={nodeTypes}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={false}
-            panOnDrag={false}
-            zoomOnScroll={false}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background color="rgba(244, 239, 228, 0.08)" gap={24} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </div>
-        <div className="graph-footnotes">
-          <p>
-            Visible evidence records:{" "}
-            {Array.from(visibleEventIds)
-              .map(String)
-              .join(", ") || "None yet"}
-          </p>
-          <p>{currentCycle === 1 ? "Cycle 1 exposes false consensus around Supplier A." : "Cycle 2 shows independent support for Supplier B."}</p>
-        </div>
-      </section>
-
-      <section className="section-grid reveal-panel">
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Timeline</p>
-              <h2>Replanning stays legible across cycles.</h2>
-            </div>
-          </div>
-          <ol className="timeline-list">
-            {events.length === 0 ? (
-              <li className="timeline-empty">
-                {playbackMode === "live"
-                  ? "Start the live run to populate the workflow ledger."
-                  : "Start the recorded run to populate the workflow ledger."}
-              </li>
-            ) : (
-              events.map((event) => (
-                <li key={event.event_id} className="timeline-row">
-                  <span className="timeline-sequence">{String(event.sequence).padStart(2, "0")}</span>
-                  <div className="timeline-card">
-                    <div className="timeline-meta">
-                      <span>{labelForEvent(event.event_type)}</span>
-                      <span>Cycle {String(event.payload.cycle ?? "-")}</span>
-                      <span>{formatClock(event.occurred_at)} UTC</span>
-                    </div>
-                    <h3>{String(event.payload.note ?? event.payload.summary ?? event.payload.reason ?? "Recorded transition")}</h3>
-                    <p className="muted-copy">
-                      {event.actor_id ? `${event.actor_id} · ` : ""}
-                      {JSON.stringify(event.payload)}
-                    </p>
-                  </div>
-                </li>
-              ))
-            )}
-          </ol>
-        </article>
-
-        <article className="surface-card">
-          <div className="section-heading">
-            <div>
-              <p className="utility-kicker">Execution Boundary</p>
-              <h2>Approval, freshness revalidation, and duplicate protection each get their own state.</h2>
-            </div>
-            <span className={`tone-chip ${statusTone(scenarioRecord.execution.current_state)}`}>
-              {scenarioRecord.execution.current_state.replaceAll("_", " ")}
+            <span>
+              Trust
+              <br />
+              The
+              <br />
+              Lineage
             </span>
           </div>
-          <p className="muted-copy">{scenarioRecord.execution.detail}</p>
-          <div className="ttl-grid">
-            {scenarioRecord.execution.freshness_ttls.map((item) => (
-              <article key={item.label} className="ttl-card">
-                <p className="panel-kicker">{item.label}</p>
-                <div className="ttl-meta">
-                  <strong>{item.ttl}</strong>
-                  <span className={`tone-chip ${statusTone(item.state)}`}>{item.state}</span>
+
+          <a className="scroll-cue" href="#story">
+            Scroll to Investigate <span aria-hidden="true">↓</span>
+          </a>
+        </section>
+
+        <section className="story" id="story" ref={storyRef} aria-label="Decision Story">
+          <div className="story-progress" aria-hidden="true">
+            <div className="story-progress__labels">
+              {STORY_CHAPTERS.map((chapter) => (
+                <span key={chapter}>{chapter}</span>
+              ))}
+            </div>
+            <i>
+              <b className="story-progress__fill" />
+            </i>
+          </div>
+
+          <div className="story-track">
+            <article className="story-frame story-frame--consensus">
+              <div className="frame-index">01 / Parliament</div>
+              <div className="frame-copy">
+                <p className="eyebrow">The Vote</p>
+                <h2>
+                  5 Voices.
+                  <br />1 Answer.
+                </h2>
+                <p>Supplier A appears to win.</p>
+              </div>
+              <div className="consensus-core">
+                <strong>5/6</strong>
+                <span>Supplier A</span>
+                <div className="agent-ring" aria-label="Parliament Recommendations">
+                  {scenarioRecord.parliament.map((agent, index) => (
+                    <div
+                      key={agent.agent_id}
+                      className={agent.supplier === "Supplier A" ? "is-majority" : ""}
+                      style={{ "--i": index } as React.CSSProperties}
+                      title={`${agent.label}: ${agent.supplier}`}
+                    >
+                      {agent.label.slice(0, 1)}
+                    </div>
+                  ))}
                 </div>
-              </article>
+              </div>
+            </article>
+
+            <article className="story-frame story-frame--lineage">
+              <div className="frame-index">02 / Jury</div>
+              <div className="frame-copy">
+                <p className="eyebrow">Trace the Source</p>
+                <h2>
+                  5 Voices.
+                  <br />1 Origin.
+                </h2>
+                <p>Consensus collapses under lineage.</p>
+              </div>
+              <div className="lineage-web" aria-label="Shared Evidence Lineage">
+                <div className="source-pulse">
+                  <span>Shared Source</span>
+                  <strong>
+                    Supplier A<br />
+                    Master
+                  </strong>
+                </div>
+                <div className="lineage-spokes" aria-hidden="true">
+                  {scenarioRecord.parliament.slice(0, 5).map((agent, index) => (
+                    <i key={agent.agent_id} style={{ "--i": index } as React.CSSProperties} />
+                  ))}
+                </div>
+                <div className="lineage-agents">
+                  {scenarioRecord.parliament.slice(0, 5).map((agent) => (
+                    <span key={agent.agent_id}>{agent.label}</span>
+                  ))}
+                </div>
+                <div className="echo-stamp">+ 1 Agent Echo</div>
+              </div>
+            </article>
+
+            <article className="story-frame story-frame--dissent">
+              <div className="frame-index">03 / Clean Room</div>
+              <div className="frame-copy frame-copy--light">
+                <p className="eyebrow">Dissent Investigates</p>
+                <h2>
+                  The Story
+                  <br />
+                  Breaks.
+                </h2>
+                <p>A fresh audit contradicts the plan.</p>
+              </div>
+              <div className="contradiction">
+                <div>
+                  <span>Parliament Assumed</span>
+                  <strong>1</strong>
+                  <small>Day Lead Time</small>
+                </div>
+                <div className="contradiction__slash" aria-hidden="true" />
+                <div>
+                  <span>Clean Room Found</span>
+                  <strong>10</strong>
+                  <small>Days / Live Audit</small>
+                </div>
+                <p>
+                  Integrity <b>41</b> / Investigate
+                </p>
+              </div>
+            </article>
+
+            <article className="story-frame story-frame--replan">
+              <div className="frame-index">04 / Replan</div>
+              <div className="frame-copy">
+                <p className="eyebrow">Evidence Changes the Plan</p>
+                <h2>
+                  Trust,
+                  <br />
+                  Rebuilt.
+                </h2>
+                <p>Supplier B survives independent checks.</p>
+              </div>
+              <div className="approval-mark">
+                <div className="approval-mark__score">
+                  <strong>91</strong>
+                  <span>Integrity</span>
+                </div>
+                <div className="approval-mark__route">
+                  <span>Supplier B</span>
+                  <i aria-hidden="true" />
+                  <span>Approved</span>
+                </div>
+                <p>Independent evidence / Fresh inputs / All gates passed</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section className="evidence-section" id="evidence">
+          <header className="evidence-heading reveal">
+            <p className="eyebrow">Live Evidence Map / Cycle {hasStarted ? currentCycle : 1}</p>
+            <h2>
+              See What
+              <br />
+              They Saw.
+            </h2>
+            <div className="evidence-score">
+              <span>Decision Integrity</span>
+              <strong>{hasStarted ? currentJury.integrity_score : 41}</strong>
+              <small>{hasStarted ? currentJury.state : "investigate"}</small>
+            </div>
+          </header>
+
+          <div className="evidence-canvas reveal">
+            <ReactFlow
+              fitView
+              nodes={graphNodes}
+              edges={graphEdges}
+              nodeTypes={nodeTypes}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable
+              panOnDrag
+              zoomOnScroll={false}
+              zoomOnPinch
+              minZoom={0.55}
+              maxZoom={1.5}
+              proOptions={{ hideAttribution: true }}
+              aria-label="Evidence Lineage Graph"
+            >
+              <Background color="rgba(247,244,234,0.12)" gap={30} />
+            </ReactFlow>
+          </div>
+
+          <div className="integrity-audit reveal">
+            <section aria-labelledby="components-title">
+              <header>
+                <span>01</span>
+                <h3 id="components-title">Integrity Components</h3>
+              </header>
+              <dl>
+                {Object.entries(currentJury.components).map(([component, score]) => (
+                  <div key={component}>
+                    <dt>{component.replaceAll("_", " ")}</dt>
+                    <dd>{score}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+            <section aria-labelledby="gates-title">
+              <header>
+                <span>02</span>
+                <h3 id="gates-title">Hard Gates</h3>
+              </header>
+              <ul>
+                {currentJury.gates.map((gate) => (
+                  <li key={gate.gate_code} className={gate.passed ? "is-passed" : "is-blocked"}>
+                    <span>{gate.gate_code.replaceAll("-", " ")}</span>
+                    <strong>{gate.passed ? "Pass" : "Block"}</strong>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+
+          <div className="evidence-legend reveal" aria-label="Graph Legend">
+            <span>
+              <i className="legend-shared" /> Shared Source
+            </span>
+            <span>
+              <i className="legend-clean" /> Clean Room
+            </span>
+            <span>
+              <i className="legend-conflict" /> Contradiction
+            </span>
+            <p>Drag to explore / Pinch to zoom</p>
+          </div>
+        </section>
+
+        <section className="execution-section" id="execution">
+          <header className="execution-heading reveal">
+            <p className="eyebrow">Safe Execution Boundary</p>
+            <h2>
+              One Decision.
+              <br />
+              One Write.
+            </h2>
+            <p>Freshness is checked at the moment of action. Retries cannot duplicate the order.</p>
+          </header>
+
+          <div className="execution-path reveal">
+            {scenarioRecord.execution.steps.map((step, index) => (
+              <div key={step.label} className={`execution-node execution-node--${step.state}`}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <strong>{step.label}</strong>
+                <small>{step.state.replaceAll("_", " ")}</small>
+              </div>
             ))}
           </div>
-          <ExecutionRail steps={scenarioRecord.execution.steps} progress={executionStepProgress} />
-        </article>
-      </section>
-    </main>
+
+          <div className="execution-proof reveal">
+            <div className="order-stamp">
+              <span>Approved MCP Write</span>
+              <strong>ORDER / 001</strong>
+              <small>Supplier B · 4 units</small>
+            </div>
+            <div className="duplicate-stamp">
+              <span>Retry / Same Key</span>
+              <strong>Duplicate Blocked</strong>
+            </div>
+          </div>
+
+          <section className="live-trace reveal" aria-labelledby="trace-title">
+            <header>
+              <h3 id="trace-title">Live Trace</h3>
+              <span>{events.length} Events</span>
+            </header>
+            {events.length === 0 ? (
+              <p className="trace-empty">Run the story to watch the workflow arrive over SSE.</p>
+            ) : (
+              <ol>
+                {events.slice(-8).map((event) => (
+                  <li key={event.event_id}>
+                    <time dateTime={event.occurred_at}>{formatClock(event.occurred_at)}</time>
+                    <span>{labelForEvent(event.event_type)}</span>
+                    <i aria-hidden="true" />
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </section>
+      </main>
+
+      <footer className="site-footer">
+        <span translate="no">Civitas / Agent Parliament + Jury</span>
+        <a href="#top">Back to Top ↑</a>
+      </footer>
+    </div>
   );
 }

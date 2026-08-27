@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from http.client import HTTPResponse
 from json import JSONDecodeError
-from typing import Protocol, cast
+from typing import Protocol, TypeGuard, cast
 from urllib import error, request
 
 from civitas.contracts.common import JsonObject
 from civitas.contracts.model import ModelRequest, ModelResponse, ModelUsage
 from civitas.ports.model_provider import ModelProvider
+
+MAX_MODEL_RESPONSE_BYTES = 1_048_576
 
 
 class ModelAdapterError(RuntimeError):
@@ -87,6 +91,7 @@ class GroqModelAdapter(ModelProvider):
         self._endpoint = endpoint
         self._retry_policy = retry_policy
         self._opener = opener
+        self._offload_http = opener is _default_urlopen
 
     async def complete(self, request_contract: ModelRequest) -> ModelResponse:
         body = self._build_request_body(request_contract)
@@ -120,7 +125,7 @@ class GroqModelAdapter(ModelProvider):
                 "strict": True,
             },
         }
-        payload: JsonObject = {
+        payload: dict[str, object] = {
             "model": self._model_identifier,
             "messages": messages,
             "response_format": response_format,
@@ -128,7 +133,7 @@ class GroqModelAdapter(ModelProvider):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        return payload
+        return cast(JsonObject, payload)
 
     async def _post_with_retry(self, body: JsonObject, *, timeout: float) -> JsonObject:
         attempt = 0
@@ -138,7 +143,7 @@ class GroqModelAdapter(ModelProvider):
             attempt += 1
             try:
                 return await asyncio.wait_for(
-                    asyncio.to_thread(self._post_once, encoded, timeout), timeout=timeout
+                    self._post_once_async(encoded, timeout), timeout=timeout
                 )
             except TimeoutError as exc:
                 if attempt >= self._retry_policy.attempts:
@@ -156,6 +161,13 @@ class GroqModelAdapter(ModelProvider):
                 message = getattr(exc.reason, "strerror", None) or str(exc.reason)
                 raise ModelTransportError(f"Groq request failed: {message}") from exc
 
+    async def _post_once_async(self, encoded: bytes, timeout: float) -> JsonObject:
+        if self._offload_http:
+            return await asyncio.to_thread(self._post_once, encoded, timeout)
+        # Injected openers are deterministic test transports and must not leave
+        # default-executor threads attached to pytest's short-lived event loops.
+        return self._post_once(encoded, timeout)
+
     def _post_once(self, encoded: bytes, timeout: float) -> JsonObject:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -169,7 +181,10 @@ class GroqModelAdapter(ModelProvider):
         )
         try:
             response = self._opener(request_obj, timeout=timeout)
-            response_body = response.read().decode("utf-8")
+            raw_response = response.read(MAX_MODEL_RESPONSE_BYTES + 1)
+            if len(raw_response) > MAX_MODEL_RESPONSE_BYTES:
+                raise ModelResponseFormatError("Groq response exceeded the 1 MiB safety limit.")
+            response_body = raw_response.decode("utf-8")
         except error.HTTPError as exc:
             if exc.code in self._retry_policy.retryable_status_codes:
                 raise _RetryableHTTPError(
@@ -178,8 +193,8 @@ class GroqModelAdapter(ModelProvider):
                 ) from exc
             raise
         try:
-            payload = json.loads(response_body)
-        except JSONDecodeError as exc:
+            payload = json.loads(response_body, parse_constant=_reject_json_constant)
+        except (JSONDecodeError, ValueError) as exc:
             raise ModelResponseFormatError("Groq response was not valid JSON.") from exc
         if not isinstance(payload, dict):
             raise ModelResponseFormatError("Groq response JSON must be an object.")
@@ -201,10 +216,12 @@ class GroqModelAdapter(ModelProvider):
         if not isinstance(content, str):
             raise ModelResponseFormatError("Groq response message content must be a JSON string.")
         try:
-            structured_output = json.loads(content)
-        except JSONDecodeError as exc:
+            structured_output = json.loads(content, parse_constant=_reject_json_constant)
+        except (JSONDecodeError, ValueError) as exc:
             raise ModelOutputValidationError("Model output was not valid JSON.") from exc
         _validate_against_schema(structured_output, request_contract.output_schema, path="$")
+        if not isinstance(structured_output, dict):
+            raise ModelOutputValidationError("Model output root must be a JSON object.")
         usage_payload = response_payload.get("usage")
         usage = _parse_usage(usage_payload)
         finish_reason = first_choice.get("finish_reason")
@@ -225,9 +242,7 @@ class GroqModelAdapter(ModelProvider):
 @dataclass(frozen=True, slots=True)
 class FakeModelPlan:
     structured_output: JsonObject
-    usage: ModelUsage = field(
-        default_factory=lambda: ModelUsage(input_tokens=0, output_tokens=0)
-    )
+    usage: ModelUsage = field(default_factory=lambda: ModelUsage(input_tokens=0, output_tokens=0))
     model_identifier: str = "fake-model"
     finish_reason: str = "stop"
     error: ModelAdapterError | None = None
@@ -281,9 +296,39 @@ def _parse_usage(payload: object) -> ModelUsage:
     return ModelUsage(input_tokens=prompt_tokens, output_tokens=completion_tokens)
 
 
+def _reject_json_constant(value: str) -> object:
+    raise ValueError(f"non-standard JSON constant {value!r} is not allowed")
+
+
 def _validate_against_schema(instance: object, schema: object, *, path: str) -> None:
     if not isinstance(schema, Mapping):
         raise ModelOutputValidationError("Output schema must be a JSON object.")
+
+    if "const" in schema and instance != schema["const"]:
+        raise ModelOutputValidationError(f"{path} must equal the schema constant.")
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and instance not in enum_values:
+        raise ModelOutputValidationError(f"{path} must be one of {enum_values}.")
+
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        alternatives = schema.get(keyword)
+        if alternatives is None:
+            continue
+        if not isinstance(alternatives, list) or not alternatives:
+            raise ModelOutputValidationError(f"{path} {keyword} must be a non-empty array.")
+        matches = 0
+        for alternative in alternatives:
+            try:
+                _validate_against_schema(instance, alternative, path=path)
+            except ModelOutputValidationError:
+                continue
+            matches += 1
+        if keyword == "allOf" and matches != len(alternatives):
+            raise ModelOutputValidationError(f"{path} did not satisfy allOf.")
+        if keyword == "anyOf" and matches == 0:
+            raise ModelOutputValidationError(f"{path} did not satisfy anyOf.")
+        if keyword == "oneOf" and matches != 1:
+            raise ModelOutputValidationError(f"{path} did not satisfy exactly one oneOf schema.")
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
@@ -305,6 +350,7 @@ def _validate_against_schema(instance: object, schema: object, *, path: str) -> 
     if schema_type == "object":
         if not isinstance(instance, Mapping):
             raise ModelOutputValidationError(f"{path} must be an object.")
+        _validate_size(instance, schema, path, "Properties")
         properties = schema.get("properties", {})
         if not isinstance(properties, Mapping):
             raise ModelOutputValidationError(f"{path} properties must be an object.")
@@ -325,11 +371,20 @@ def _validate_against_schema(instance: object, schema: object, *, path: str) -> 
         for key, value in instance.items():
             if key in properties:
                 _validate_against_schema(value, properties[key], path=f"{path}.{key}")
+            elif isinstance(allow_additional, Mapping):
+                _validate_against_schema(value, allow_additional, path=f"{path}.{key}")
         return
 
     if schema_type == "array":
         if not isinstance(instance, list):
             raise ModelOutputValidationError(f"{path} must be an array.")
+        _validate_size(instance, schema, path, "Items")
+        if schema.get("uniqueItems") is True:
+            serialized = [
+                json.dumps(item, sort_keys=True, separators=(",", ":")) for item in instance
+            ]
+            if len(serialized) != len(set(serialized)):
+                raise ModelOutputValidationError(f"{path} must contain unique items.")
         item_schema = schema.get("items")
         if item_schema is None:
             return
@@ -340,19 +395,31 @@ def _validate_against_schema(instance: object, schema: object, *, path: str) -> 
     if schema_type == "string":
         if not isinstance(instance, str):
             raise ModelOutputValidationError(f"{path} must be a string.")
-        enum_values = schema.get("enum")
-        if isinstance(enum_values, list) and instance not in enum_values:
-            raise ModelOutputValidationError(f"{path} must be one of {enum_values}.")
+        _validate_size(instance, schema, path, "Length")
+        pattern = schema.get("pattern")
+        if pattern is not None:
+            if not isinstance(pattern, str):
+                raise ModelOutputValidationError(f"{path} pattern must be a string.")
+            try:
+                pattern_match = re.search(pattern, instance)
+            except re.error as exc:
+                raise ModelOutputValidationError(f"{path} schema pattern is invalid.") from exc
+            if pattern_match is None:
+                raise ModelOutputValidationError(f"{path} does not match the required pattern.")
         return
 
     if schema_type == "integer":
         if not isinstance(instance, int) or isinstance(instance, bool):
             raise ModelOutputValidationError(f"{path} must be an integer.")
+        _validate_number(instance, schema, path)
         return
 
     if schema_type == "number":
         if not isinstance(instance, (int, float)) or isinstance(instance, bool):
             raise ModelOutputValidationError(f"{path} must be a number.")
+        if not math.isfinite(instance):
+            raise ModelOutputValidationError(f"{path} must be finite.")
+        _validate_number(instance, schema, path)
         return
 
     if schema_type == "boolean":
@@ -365,15 +432,42 @@ def _validate_against_schema(instance: object, schema: object, *, path: str) -> 
             raise ModelOutputValidationError(f"{path} must be null.")
         return
 
-    if "enum" in schema:
-        enum_values = schema["enum"]
-        if isinstance(enum_values, list) and instance not in enum_values:
-            raise ModelOutputValidationError(f"{path} must be one of {enum_values}.")
-        return
-
     if isinstance(instance, (dict, list, str, int, float, bool)) or instance is None:
         return
 
     raise ModelOutputValidationError(
         f"{path} contains a non-JSON value: {type(instance).__name__}."
     )
+
+
+def _validate_size(instance: object, schema: Mapping[object, object], path: str, noun: str) -> None:
+    size = len(instance)  # type: ignore[arg-type]
+    minimum = schema.get(f"min{noun}")
+    maximum = schema.get(f"max{noun}")
+    if isinstance(minimum, int) and size < minimum:
+        raise ModelOutputValidationError(f"{path} has fewer than {minimum} {noun.lower()}.")
+    if isinstance(maximum, int) and size > maximum:
+        raise ModelOutputValidationError(f"{path} has more than {maximum} {noun.lower()}.")
+
+
+def _validate_number(
+    instance: int | float,
+    schema: Mapping[object, object],
+    path: str,
+) -> None:
+    minimum = schema.get("minimum")
+    maximum = schema.get("maximum")
+    exclusive_minimum = schema.get("exclusiveMinimum")
+    exclusive_maximum = schema.get("exclusiveMaximum")
+    if _numeric(minimum) and instance < minimum:
+        raise ModelOutputValidationError(f"{path} violates minimum={minimum}.")
+    if _numeric(maximum) and instance > maximum:
+        raise ModelOutputValidationError(f"{path} violates maximum={maximum}.")
+    if _numeric(exclusive_minimum) and instance <= exclusive_minimum:
+        raise ModelOutputValidationError(f"{path} violates exclusiveMinimum={exclusive_minimum}.")
+    if _numeric(exclusive_maximum) and instance >= exclusive_maximum:
+        raise ModelOutputValidationError(f"{path} violates exclusiveMaximum={exclusive_maximum}.")
+
+
+def _numeric(value: object) -> TypeGuard[int | float]:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)

@@ -74,6 +74,10 @@ class MCPClient(MCPPort):
             raise MCPAccessError(
                 f"{call.access_mode.value} access denied for tool {call.tool_name}."
             )
+        if call.access_mode is MCPAccessMode.WRITE and not (
+            call.idempotency_key and call.idempotency_key.strip()
+        ):
+            raise MCPAccessError("MCP write calls require a non-empty idempotency key.")
         result = await self._transport.invoke(call)
         if not result.succeeded:
             detail = result.error_message or "MCP tool invocation failed."

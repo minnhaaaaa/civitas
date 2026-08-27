@@ -4,7 +4,7 @@ Civitas is an autonomous multi-agent food-procurement system that combines negot
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The project is currently in the foundation stage. See [PLAN.md](PLAN.md) for the delivery plan, [AGENTS.md](AGENTS.md) for behavioral and engineering requirements, and [TECH_STACK.md](TECH_STACK.md) for approved technologies.
+The repository contains the integrated MVP and its deterministic false-consensus demonstration. See [PLAN.md](PLAN.md) for the delivery plan, [AGENTS.md](AGENTS.md) for behavioral and engineering requirements, [TECH_STACK.md](TECH_STACK.md) for approved technologies, and [SECURITY.md](SECURITY.md) for trust boundaries and the latest audit status.
 
 ## Development
 
@@ -35,11 +35,13 @@ pnpm build
 Run the backend API and the viewer locally with:
 
 ```bash
-uv run uvicorn civitas.api.app:create_app --factory --host 127.0.0.1 --port 8000
+uv run uvicorn civitas.api.app:create_app --factory --host 127.0.0.1 --port 8001
 pnpm --filter @civitas/web dev
 ```
 
-The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000`.
+The Vite dev server proxies `/api` requests to `http://127.0.0.1:8001`.
+
+`civitas.api.app:create_app` is the local, simulated demonstration API. It uses no live provider and performs no real procurement side effects. Keep it bound to loopback. The persistence-backed API factory in `civitas.api.guarded_api` requires a bearer token of at least 32 characters and an organization binding when it is composed by a deployment.
 
 ## Demo
 
@@ -57,7 +59,7 @@ Run the integration-focused checks with:
 uv run pytest tests/integration/test_demo_api.py tests/unit/execution/test_service.py tests/contract/test_mcp_integration.py -q
 ```
 
-Open the viewer at `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The event docket should show this sequence:
+Open the viewer at `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
 
 ```text
 evidence retrieval

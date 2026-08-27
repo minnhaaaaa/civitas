@@ -11,24 +11,14 @@ export type WorkflowEventType =
 
 export type JuryState = "approve" | "investigate" | "escalate" | "reject";
 
-export type ExecutionState = "pending" | "succeeded" | "failed" | "compensation_required" | "compensated" | "duplicate";
+export type ExecutionState =
+  "pending" | "succeeded" | "failed" | "compensation_required" | "compensated" | "duplicate";
 
 export type WorkflowPhase =
-  | "planning"
-  | "parliament"
-  | "jury"
-  | "investigation"
-  | "execution"
-  | "terminal"
-  | "evidence";
+  "planning" | "parliament" | "jury" | "investigation" | "execution" | "terminal" | "evidence";
 
 export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: JsonValue }
-  | JsonValue[];
+  string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 
 export type JsonObject = { [key: string]: JsonValue };
 

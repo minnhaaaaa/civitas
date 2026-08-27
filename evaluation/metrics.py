@@ -43,7 +43,9 @@ def calculate_suite_metrics(results: tuple[ScenarioResult, ...]) -> SuiteMetrics
 
     return SuiteMetrics(
         total_scenarios=len(results),
-        solver_status_accuracy=_ratio(sum(item.solver_status_match for item in results), len(results)),
+        solver_status_accuracy=_ratio(
+            sum(item.solver_status_match for item in results), len(results)
+        ),
         jury_state_accuracy=_ratio(sum(item.jury_state_match for item in results), len(results)),
         reason_code_precision=_ratio(matched_reason_total, actual_reason_total),
         reason_code_recall=_ratio(matched_reason_total, expected_reason_total),

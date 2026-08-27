@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -25,7 +25,13 @@ from civitas.evidence import (
     JuryInputs,
     ReasonCode,
 )
-from civitas.optimization import Demand, InventoryLot, OptimizationProblem, PlanningBucket, SupplierOffer
+from civitas.optimization import (
+    Demand,
+    InventoryLot,
+    OptimizationProblem,
+    PlanningBucket,
+    SupplierOffer,
+)
 
 NOW = datetime(2026, 8, 27, 10, 0, tzinfo=UTC)
 
@@ -242,7 +248,9 @@ def _dissent(*, invalidates: bool = False):
     )
 
 
-def _jury_request(*, evidence_ids: tuple[str, ...], supporting_claim_ids: tuple[str, ...]) -> JuryRequest:
+def _jury_request(
+    *, evidence_ids: tuple[str, ...], supporting_claim_ids: tuple[str, ...]
+) -> JuryRequest:
     return JuryRequest(
         planning_run_id="run-1",
         candidate_plan=CandidatePlan(
@@ -259,10 +267,17 @@ def _jury_request(*, evidence_ids: tuple[str, ...], supporting_claim_ids: tuple[
 
 
 def _scenario_independent_consensus() -> GoldenScenario:
-    claims = (_claim("c-lead", "lead_time", 2, supplier_id="supplier-a"), _claim("c-price", "unit_price", 5, supplier_id="supplier-a"))
+    claims = (
+        _claim("c-lead", "lead_time", 2, supplier_id="supplier-a"),
+        _claim("c-price", "unit_price", 5, supplier_id="supplier-a"),
+    )
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-a-live", source_type="supplier_api"),
-        _evidence("e-price", claim_ids=("c-price",), source_id="pricebook-1", source_type="price_feed"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-a-live", source_type="supplier_api"
+        ),
+        _evidence(
+            "e-price", claim_ids=("c-price",), source_id="pricebook-1", source_type="price_feed"
+        ),
     )
     return GoldenScenario(
         manifest=ScenarioManifest(
@@ -273,7 +288,9 @@ def _scenario_independent_consensus() -> GoldenScenario:
             ("golden", "consensus"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("Visible observations already match ground truth.",)),
+        true_world_state=HiddenWorldState(
+            notes=("Visible observations already match ground truth.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=5,
@@ -303,7 +320,12 @@ def _scenario_independent_consensus() -> GoldenScenario:
 def _scenario_shared_source_false_consensus() -> GoldenScenario:
     claims = (_claim("c-lead", "lead_time", 2, supplier_id="supplier-a"),)
     evidence = (
-        _evidence("e-primary", claim_ids=("c-lead",), source_id="supplier-a-master", source_type="supplier_api"),
+        _evidence(
+            "e-primary",
+            claim_ids=("c-lead",),
+            source_id="supplier-a-master",
+            source_type="supplier_api",
+        ),
         _evidence(
             "e-echo",
             claim_ids=("c-lead",),
@@ -325,14 +347,18 @@ def _scenario_shared_source_false_consensus() -> GoldenScenario:
             ("golden", "shared-source"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("Two apparent supports collapse to one upstream source.",)),
+        true_world_state=HiddenWorldState(
+            notes=("Two apparent supports collapse to one upstream source.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=4,
                 inventory_quantity=2,
                 offers=(_offer("offer-a", "supplier-a", capacity=2, unit_cost=4),),
             ),
-            jury_request=_jury_request(evidence_ids=("e-primary", "e-echo"), supporting_claim_ids=("c-lead",)),
+            jury_request=_jury_request(
+                evidence_ids=("e-primary", "e-echo"), supporting_claim_ids=("c-lead",)
+            ),
             jury_inputs=JuryInputs(claims=claims, evidence=evidence, dissent=_dissent()),
         ),
         expected_lineage=ExpectedEvidenceLineage(
@@ -356,7 +382,12 @@ def _scenario_shared_source_false_consensus() -> GoldenScenario:
 
 def _scenario_agent_echo() -> GoldenScenario:
     hidden_evidence = (
-        _evidence("e-root", claim_ids=("c-lead",), source_id="supplier-a-master", source_type="supplier_api"),
+        _evidence(
+            "e-root",
+            claim_ids=("c-lead",),
+            source_id="supplier-a-master",
+            source_type="supplier_api",
+        ),
     )
     visible_evidence = (
         _evidence(
@@ -380,7 +411,9 @@ def _scenario_agent_echo() -> GoldenScenario:
         ),
         true_world_state=HiddenWorldState(
             hidden_evidence=hidden_evidence,
-            notes=("The visible fixture contains only the echo, not the originating external record.",),
+            notes=(
+                "The visible fixture contains only the echo, not the originating external record.",
+            ),
         ),
         visible=VisibleObservations(
             problem=_problem(
@@ -445,7 +478,9 @@ def _scenario_stale_contradiction() -> GoldenScenario:
             ("golden", "stale", "contradiction"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("A fresh source contradicts the stale operational assumption.",)),
+        true_world_state=HiddenWorldState(
+            notes=("A fresh source contradicts the stale operational assumption.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=4,
@@ -499,8 +534,15 @@ def _scenario_clean_mcp_evidence() -> GoldenScenario:
         _claim("c-inventory", "inventory_balance", 4, warehouse_id="warehouse-1"),
     )
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-b-live", source_type="supplier_api"),
-        _evidence("e-inventory", claim_ids=("c-inventory",), source_id="warehouse-1-ledger", source_type="inventory_api"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-b-live", source_type="supplier_api"
+        ),
+        _evidence(
+            "e-inventory",
+            claim_ids=("c-inventory",),
+            source_id="warehouse-1-ledger",
+            source_type="inventory_api",
+        ),
     )
     return GoldenScenario(
         manifest=ScenarioManifest(
@@ -511,7 +553,9 @@ def _scenario_clean_mcp_evidence() -> GoldenScenario:
             ("golden", "mcp"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("Fresh supplier and inventory data agree with the plan.",)),
+        true_world_state=HiddenWorldState(
+            notes=("Fresh supplier and inventory data agree with the plan.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=4,
@@ -540,13 +584,22 @@ def _scenario_clean_mcp_evidence() -> GoldenScenario:
 
 
 def _scenario_objective_conflict() -> GoldenScenario:
-    claims = (_claim("c-lead", "lead_time", 1, supplier_id="supplier-a"), _claim("c-price", "unit_price", 3, supplier_id="supplier-a"))
+    claims = (
+        _claim("c-lead", "lead_time", 1, supplier_id="supplier-a"),
+        _claim("c-price", "unit_price", 3, supplier_id="supplier-a"),
+    )
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-a-live", source_type="supplier_api"),
-        _evidence("e-price", claim_ids=("c-price",), source_id="pricebook-2", source_type="price_feed"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-a-live", source_type="supplier_api"
+        ),
+        _evidence(
+            "e-price", claim_ids=("c-price",), source_id="pricebook-2", source_type="price_feed"
+        ),
     )
     offers = (
-        _offer("offer-cheap", "supplier-a", capacity=6, unit_cost=3, risk=10, expected_waste_rate=5),
+        _offer(
+            "offer-cheap", "supplier-a", capacity=6, unit_cost=3, risk=10, expected_waste_rate=5
+        ),
         _offer("offer-safe", "supplier-b", capacity=6, unit_cost=6, risk=0, expected_waste_rate=0),
     )
     return GoldenScenario(
@@ -558,7 +611,9 @@ def _scenario_objective_conflict() -> GoldenScenario:
             ("golden", "tradeoff"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("No single option dominates cost, risk, and waste simultaneously.",)),
+        true_world_state=HiddenWorldState(
+            notes=("No single option dominates cost, risk, and waste simultaneously.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(demand_quantity=6, offers=offers),
             jury_request=_jury_request(
@@ -587,7 +642,9 @@ def _scenario_objective_conflict() -> GoldenScenario:
 def _scenario_partial_fulfillment() -> GoldenScenario:
     claims = (_claim("c-lead", "lead_time", 1, supplier_id="supplier-c"),)
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-c-live", source_type="supplier_api"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-c-live", source_type="supplier_api"
+        ),
     )
     return GoldenScenario(
         manifest=ScenarioManifest(
@@ -598,7 +655,9 @@ def _scenario_partial_fulfillment() -> GoldenScenario:
             ("golden", "shortage"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("Inputs are sound but total available supply cannot satisfy all demand.",)),
+        true_world_state=HiddenWorldState(
+            notes=("Inputs are sound but total available supply cannot satisfy all demand.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=10,
@@ -623,7 +682,9 @@ def _scenario_partial_fulfillment() -> GoldenScenario:
 def _scenario_fefo_failure() -> GoldenScenario:
     claims = (_claim("c-lead", "lead_time", 1, supplier_id="supplier-d"),)
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-d-live", source_type="supplier_api"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-d-live", source_type="supplier_api"
+        ),
     )
     bucket = _bucket()
     problem = OptimizationProblem(
@@ -644,7 +705,9 @@ def _scenario_fefo_failure() -> GoldenScenario:
             ("golden", "fefo"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("The candidate plan consumed newer stock before earlier-expiring stock.",)),
+        true_world_state=HiddenWorldState(
+            notes=("The candidate plan consumed newer stock before earlier-expiring stock.",)
+        ),
         visible=VisibleObservations(
             problem=problem,
             jury_request=_jury_request(evidence_ids=("e-lead",), supporting_claim_ids=("c-lead",)),
@@ -652,7 +715,9 @@ def _scenario_fefo_failure() -> GoldenScenario:
                 claims=claims,
                 evidence=evidence,
                 dissent=_dissent(),
-                gate_facts=GateFacts(hard_constraint_violations=("FEFO violation: lot-new used before lot-old",)),
+                gate_facts=GateFacts(
+                    hard_constraint_violations=("FEFO violation: lot-new used before lot-old",)
+                ),
             ),
             candidate_plan_override=CandidatePlan(
                 plan_id="manual-fefo-plan",
@@ -677,7 +742,12 @@ def _scenario_fefo_failure() -> GoldenScenario:
 def _scenario_capacity_conflict() -> GoldenScenario:
     claims = (_claim("c-capacity", "warehouse_capacity", 2, warehouse_id="warehouse-1"),)
     evidence = (
-        _evidence("e-capacity", claim_ids=("c-capacity",), source_id="warehouse-1-capacity", source_type="inventory_api"),
+        _evidence(
+            "e-capacity",
+            claim_ids=("c-capacity",),
+            source_id="warehouse-1-capacity",
+            source_type="inventory_api",
+        ),
     )
     return GoldenScenario(
         manifest=ScenarioManifest(
@@ -688,18 +758,24 @@ def _scenario_capacity_conflict() -> GoldenScenario:
             ("golden", "capacity"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("A proposed inbound quantity exceeds the warehouse's declared capacity.",)),
+        true_world_state=HiddenWorldState(
+            notes=("A proposed inbound quantity exceeds the warehouse's declared capacity.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=3,
                 offers=(_offer("offer-cap", "supplier-e", capacity=3, unit_cost=4),),
             ),
-            jury_request=_jury_request(evidence_ids=("e-capacity",), supporting_claim_ids=("c-capacity",)),
+            jury_request=_jury_request(
+                evidence_ids=("e-capacity",), supporting_claim_ids=("c-capacity",)
+            ),
             jury_inputs=JuryInputs(
                 claims=claims,
                 evidence=evidence,
                 dissent=_dissent(),
-                gate_facts=GateFacts(hard_constraint_violations=("warehouse warehouse-1 exceeds capacity in day-1",)),
+                gate_facts=GateFacts(
+                    hard_constraint_violations=("warehouse warehouse-1 exceeds capacity in day-1",)
+                ),
             ),
             candidate_plan_override=CandidatePlan(
                 plan_id="manual-capacity-plan",
@@ -724,7 +800,9 @@ def _scenario_capacity_conflict() -> GoldenScenario:
 def _scenario_duplicate_retry() -> GoldenScenario:
     claims = (_claim("c-lead", "lead_time", 1, supplier_id="supplier-f"),)
     evidence = (
-        _evidence("e-lead", claim_ids=("c-lead",), source_id="supplier-f-live", source_type="supplier_api"),
+        _evidence(
+            "e-lead", claim_ids=("c-lead",), source_id="supplier-f-live", source_type="supplier_api"
+        ),
     )
     return GoldenScenario(
         manifest=ScenarioManifest(
@@ -735,7 +813,9 @@ def _scenario_duplicate_retry() -> GoldenScenario:
             ("golden", "execution"),
             NOW + timedelta(minutes=1),
         ),
-        true_world_state=HiddenWorldState(notes=("The second write attempt should be blocked by the idempotency ledger.",)),
+        true_world_state=HiddenWorldState(
+            notes=("The second write attempt should be blocked by the idempotency ledger.",)
+        ),
         visible=VisibleObservations(
             problem=_problem(
                 demand_quantity=2,

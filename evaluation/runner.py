@@ -11,13 +11,12 @@ from civitas.evidence import (
     EvidenceGraphProjector,
     JuryEvaluator,
     LineageAnalyzer,
-    ReasonCode,
     detect_contradictions,
 )
 from civitas.optimization import (
     OptimizationEngine,
-    select_minimax_regret,
     exhaustive_single_bucket_optimum,
+    select_minimax_regret,
 )
 from evaluation.scenarios import GoldenScenario
 
@@ -138,20 +137,20 @@ def run_scenario(
         for claim_id, groups in scenario.expected_lineage.claim_source_groups.items()
         for group in groups
     )
-    assert frozenset(item.contradiction_id for item in contradictions) == scenario.expected_lineage.contradiction_ids
+    assert (
+        frozenset(item.contradiction_id for item in contradictions)
+        == scenario.expected_lineage.contradiction_ids
+    )
     assert actual_incomplete == scenario.expected_lineage.incomplete_lineage_evidence_ids
 
     oracle_checked = scenario.manifest.small_case_oracle
     oracle_match: bool | None = None
     if oracle_checked:
         oracle = exhaustive_single_bucket_optimum(scenario.visible.problem)
-        oracle_match = (
-            solve_result.optimal_weighted_shortage == oracle.weighted_shortage
-            and (
-                not solve_result.alternatives
-                or min(int(item.metrics["cost"]) for item in solve_result.alternatives)
-                == oracle.landed_cost
-            )
+        oracle_match = solve_result.optimal_weighted_shortage == oracle.weighted_shortage and (
+            not solve_result.alternatives
+            or min(int(item.metrics["cost"]) for item in solve_result.alternatives)
+            == oracle.landed_cost
         )
 
     regret_checked = scenario.expected_outcome.selected_maximum_regret_ceiling is not None
@@ -168,9 +167,13 @@ def run_scenario(
     execution_state_match: bool | None = None
     if scenario.visible.execution_request is not None:
         ledger = execution_ledger or ExecutionLedgerSimulator()
-        first = ledger.execute(scenario.visible.execution_request, attempted_at=scenario.manifest.calculated_at)
+        first = ledger.execute(
+            scenario.visible.execution_request, attempted_at=scenario.manifest.calculated_at
+        )
         execution_result = (
-            ledger.execute(scenario.visible.execution_request, attempted_at=scenario.manifest.calculated_at)
+            ledger.execute(
+                scenario.visible.execution_request, attempted_at=scenario.manifest.calculated_at
+            )
             if scenario.visible.retry_execution
             else first
         )

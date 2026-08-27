@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from civitas.api.guarded_api import WorkflowAPIService, WorkflowStore, create_guarded_app
 from civitas.contracts import (
@@ -21,7 +20,7 @@ from civitas.contracts import (
 )
 from civitas.persistence.database import Database
 from civitas.persistence.models import OrganizationModel, PlanningRunModel
-from civitas.workflow import ParliamentWorkflow, WorkflowLimits
+from civitas.workflow import ParliamentWorkflow
 
 
 class FakeClock:
@@ -93,7 +92,7 @@ def identifier(prefix: str) -> str:
     return f"{prefix}-{uuid4()}"
 
 
-async def seed_planning_run(database: Database, planning_run_id: str) -> None:
+async def seed_planning_run(database: Database, planning_run_id: str) -> str:
     organization_id = identifier("org")
     async with database.unit_of_work() as uow:
         session = uow.require_session()
@@ -110,6 +109,7 @@ async def seed_planning_run(database: Database, planning_run_id: str) -> None:
                 status="created",
             )
         )
+    return organization_id
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -117,7 +117,7 @@ async def test_workflow_api_supports_start_inspect_resume_and_sse_cursor(
     database: Database,
 ) -> None:
     planning_run_id = identifier("run")
-    await seed_planning_run(database, planning_run_id)
+    organization_id = await seed_planning_run(database, planning_run_id)
 
     clock = FakeClock(datetime(2026, 8, 27, 12, 0, tzinfo=UTC))
     ids = FakeIDs()
@@ -129,9 +129,19 @@ async def test_workflow_api_supports_start_inspect_resume_and_sse_cursor(
     )
     store = WorkflowStore(sessions=database.sessions, ids=ids, clock=clock)
     service = WorkflowAPIService(workflow=workflow, store=store)
-    app = create_guarded_app(workflow_service=service, execution_service=StubExecutionService())
+    api_token = "integration-test-token-with-32-characters"
+    app = create_guarded_app(
+        workflow_service=service,
+        execution_service=StubExecutionService(),
+        api_token=api_token,
+        organization_id=organization_id,
+    )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {api_token}"},
+    ) as client:
         start = await client.post(
             f"/planning-runs/{planning_run_id}/start",
             json={
@@ -182,8 +192,69 @@ async def test_workflow_api_supports_start_inspect_resume_and_sse_cursor(
         assert payload["checkpoint"]["completed"] is True
         assert payload["events"][0]["event_type"] == "run.started"
 
-        stream = await client.get(f"/planning-runs/{planning_run_id}/stream", params={"cursor": 1})
+        stream = await client.get(
+            f"/planning-runs/{planning_run_id}/stream",
+            headers={"Last-Event-ID": "1"},
+        )
         assert stream.status_code == 200
         body = stream.text
         assert "id: 1" not in body
         assert "event: proposal.created" in body
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_workflow_api_rejects_missing_authentication(database: Database) -> None:
+    planning_run_id = identifier("run")
+    organization_id = await seed_planning_run(database, planning_run_id)
+    clock = FakeClock(datetime(2026, 8, 27, 12, 0, tzinfo=UTC))
+    ids = FakeIDs()
+    service = WorkflowAPIService(
+        workflow=ParliamentWorkflow(
+            optimizer=FakeOptimizer(), jury=FakeJury(), ids=ids, clock=clock
+        ),
+        store=WorkflowStore(sessions=database.sessions, ids=ids, clock=clock),
+    )
+    app = create_guarded_app(
+        workflow_service=service,
+        execution_service=StubExecutionService(),
+        api_token="integration-test-token-with-32-characters",
+        organization_id=organization_id,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/planning-runs/{planning_run_id}")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_workflow_api_rejects_cross_organization_run_access(database: Database) -> None:
+    owned_run_id = identifier("run")
+    organization_id = await seed_planning_run(database, owned_run_id)
+    foreign_run_id = identifier("run")
+    await seed_planning_run(database, foreign_run_id)
+    clock = FakeClock(datetime(2026, 8, 27, 12, 0, tzinfo=UTC))
+    ids = FakeIDs()
+    service = WorkflowAPIService(
+        workflow=ParliamentWorkflow(
+            optimizer=FakeOptimizer(), jury=FakeJury(), ids=ids, clock=clock
+        ),
+        store=WorkflowStore(sessions=database.sessions, ids=ids, clock=clock),
+    )
+    token = "integration-test-token-with-32-characters"
+    app = create_guarded_app(
+        workflow_service=service,
+        execution_service=StubExecutionService(),
+        api_token=token,
+        organization_id=organization_id,
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as client:
+        response = await client.get(f"/planning-runs/{foreign_run_id}")
+
+    assert response.status_code == 403

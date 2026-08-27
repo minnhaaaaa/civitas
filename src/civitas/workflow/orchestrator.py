@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from typing import TypedDict
 
-from civitas.agents.parliament import RoleAgent, default_role_agents, select_consensus_plan, support_counts
+from civitas.agents.parliament import (
+    RoleAgent,
+    default_role_agents,
+    select_consensus_plan,
+    support_counts,
+)
 from civitas.contracts import WorkflowEvent, WorkflowEventType
+from civitas.contracts.common import Contract, JsonObject
 from civitas.contracts.enums import JuryState
 from civitas.contracts.jury import JuryRequest
 from civitas.contracts.optimization import CandidatePlan, OptimizationRequest, OptimizationResult
@@ -34,6 +40,11 @@ from civitas.workflow.models import (
     WorkflowPhase,
     WorkflowResult,
 )
+
+
+class TopologyState(TypedDict, total=False):
+    jury_state: str
+    next_phase: str
 
 
 class ParliamentWorkflow:
@@ -115,9 +126,9 @@ class ParliamentWorkflow:
         raise ValueError(f"unsupported phase {checkpoint.phase}")
 
     def compile_langgraph(self) -> object:
-        graph = StateGraph(dict)
+        graph = StateGraph(TopologyState)
 
-        async def passthrough(state: dict) -> dict:
+        async def passthrough(state: TopologyState) -> TopologyState:
             return state
 
         graph.add_node(WorkflowPhase.PROPOSAL.value, passthrough)
@@ -360,7 +371,9 @@ class ParliamentWorkflow:
         limits: WorkflowLimits,
     ) -> tuple[WorkflowCheckpoint, tuple[WorkflowEvent, ...]]:
         if checkpoint.repeated_evidence_hits > limits.max_repeated_evidence:
-            updated, event = self._terminate(checkpoint, WorkflowPhase.ESCALATE, "repeated_evidence")
+            updated, event = self._terminate(
+                checkpoint, WorkflowPhase.ESCALATE, "repeated_evidence"
+            )
             return updated, (event,)
         if checkpoint.cycle >= limits.max_cycles:
             updated, event = self._terminate(checkpoint, WorkflowPhase.ESCALATE, "cycle_limit")
@@ -390,7 +403,9 @@ class ParliamentWorkflow:
     def _bounds_exhausted(self, checkpoint: WorkflowCheckpoint, limits: WorkflowLimits) -> bool:
         now = self._clock.now()
         cost_exhausted = limits.max_cost > 0 and checkpoint.estimated_cost_used > limits.max_cost
-        tool_exhausted = limits.max_tool_calls > 0 and checkpoint.tool_calls_used >= limits.max_tool_calls
+        tool_exhausted = (
+            limits.max_tool_calls > 0 and checkpoint.tool_calls_used >= limits.max_tool_calls
+        )
         return (
             checkpoint.cycle > limits.max_cycles
             or tool_exhausted
@@ -422,7 +437,7 @@ class ParliamentWorkflow:
         self,
         checkpoint: WorkflowCheckpoint,
         event_type: WorkflowEventType,
-        payload: object,
+        payload: Contract,
     ) -> tuple[WorkflowCheckpoint, WorkflowEvent]:
         sequence = checkpoint.event_sequence + 1
         updated = checkpoint.model_copy(update={"event_sequence": sequence})
@@ -446,15 +461,29 @@ def _selected_plan(result: OptimizationResult, selected_plan_id: str | None) -> 
 
 def _supporting_claim_ids(parliament: ParliamentSession) -> tuple[str, ...]:
     return tuple(
-        sorted({claim_id for proposal in parliament.proposals for claim_id in proposal.supporting_claim_ids})
+        sorted(
+            {
+                claim_id
+                for proposal in parliament.proposals
+                for claim_id in proposal.supporting_claim_ids
+            }
+        )
     )
 
 
 def _supporting_evidence_ids(parliament: ParliamentSession) -> tuple[str, ...]:
-    return tuple(sorted({evidence_id for proposal in parliament.proposals for evidence_id in proposal.evidence_ids}))
+    return tuple(
+        sorted(
+            {
+                evidence_id
+                for proposal in parliament.proposals
+                for evidence_id in proposal.evidence_ids
+            }
+        )
+    )
 
 
-def _plan_annotations(request: OptimizationRequest) -> dict[str, object]:
+def _plan_annotations(request: OptimizationRequest) -> JsonObject:
     value = request.constraints.get("plan_annotations", {})
     if not isinstance(value, dict):
         return {}
@@ -465,7 +494,7 @@ def _all_evidence_ids(proposals: Sequence[object]) -> tuple[str, ...]:
     evidence_ids: set[str] = set()
     for proposal in proposals:
         if hasattr(proposal, "evidence_ids"):
-            evidence_ids.update(getattr(proposal, "evidence_ids"))
+            evidence_ids.update(proposal.evidence_ids)
     return tuple(sorted(evidence_ids))
 
 
@@ -476,7 +505,7 @@ def _repeated_evidence_ids(
         evidence_id
         for proposal in proposals
         if hasattr(proposal, "evidence_ids")
-        for evidence_id in getattr(proposal, "evidence_ids")
+        for evidence_id in proposal.evidence_ids
     )
     repeated = {evidence_id for evidence_id, count in counts.items() if count > 1}
     repeated.update(evidence_id for evidence_id in seen_evidence_ids if evidence_id in counts)

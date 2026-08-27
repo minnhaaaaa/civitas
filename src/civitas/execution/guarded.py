@@ -10,7 +10,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from civitas.contracts.claims import ClaimScope, TypedClaim
@@ -21,21 +21,43 @@ from civitas.contracts.execution import ExecutionRequest, ExecutionResult
 from civitas.contracts.jury import JuryRequest
 from civitas.contracts.optimization import CandidatePlan, DistributionLine, ProcurementLine
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall, MCPToolResult
-from civitas.evidence.dissent import DissentInvestigationPlan, DissentPhase, DissentReport
+from civitas.evidence.dissent import DissentInvestigationPlan, DissentProtocol
 from civitas.evidence.jury import GateFacts, IntegrityPolicyV1, JuryEvaluator, JuryInputs
 from civitas.integrations.mcp import evidence_from_tool_result
-from civitas.persistence.inventory import DuplicateReservation, InsufficientInventory, InventoryService
+from civitas.persistence.inventory import (
+    DuplicateReservation,
+    InsufficientInventory,
+    InventoryService,
+)
 from civitas.persistence.models import (
     CandidatePlanModel,
     DistributionLineModel,
     ExecutionAuditModel,
+    InventoryLotModel,
     JuryDecisionModel,
     PlanningRunModel,
     ProcurementLineModel,
+    SKUModel,
+    SupplierModel,
+    WarehouseModel,
 )
 from civitas.ports.clock import Clock
 from civitas.ports.ids import IDGenerator
 from civitas.ports.mcp import MCPPort
+
+REQUIRED_JURY_GATES = frozenset(
+    {
+        "solver_feasibility",
+        "hard_constraints",
+        "critical_contradictions",
+        "critical_external_support",
+        "execution_freshness",
+        "autonomy_bounds",
+        "human_approval",
+        "proposal_validity",
+        "dissent_completion",
+    }
+)
 
 
 class GuardedExecutionOutcome(Contract):
@@ -51,7 +73,8 @@ class RefreshInputsPort(Protocol):
         *,
         request: ExecutionRequest,
         plan: CandidatePlan,
-    ) -> "RefreshBundle": ...
+        organization_id: str,
+    ) -> RefreshBundle: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +102,7 @@ class ConcurrentExecutionRefresher:
         *,
         request: ExecutionRequest,
         plan: CandidatePlan,
+        organization_id: str,
     ) -> RefreshBundle:
         del plan
         calls = tuple(
@@ -103,7 +127,9 @@ class ConcurrentExecutionRefresher:
         observed_unit_prices: dict[str, Decimal] = {}
         constraints: dict[str, Decimal] = {}
         for call, result in zip(calls, results, strict=True):
-            parsed_claims, parsed_prices, parsed_constraints = self._parse(call, result)
+            parsed_claims, parsed_prices, parsed_constraints = self._parse(
+                call, result, organization_id
+            )
             claims.extend(parsed_claims)
             observed_unit_prices.update(parsed_prices)
             constraints.update(parsed_constraints)
@@ -127,6 +153,7 @@ class ConcurrentExecutionRefresher:
         self,
         call: MCPToolCall,
         result: MCPToolResult,
+        organization_id: str,
     ) -> tuple[list[TypedClaim], dict[str, Decimal], dict[str, Decimal]]:
         claims: list[TypedClaim] = []
         unit_prices: dict[str, Decimal] = {}
@@ -143,7 +170,7 @@ class ConcurrentExecutionRefresher:
                         unit=str(lot.get("unit_of_measure", "unit")),
                         valid_at=result.observed_at,
                         scope=ClaimScope(
-                            organization_id="org",
+                            organization_id=organization_id,
                             sku_id=_optional_str(lot, "sku_id"),
                             warehouse_id=_optional_str(lot, "warehouse_id"),
                         ),
@@ -167,7 +194,7 @@ class ConcurrentExecutionRefresher:
                             unit="currency",
                             valid_at=result.observed_at,
                             scope=ClaimScope(
-                                organization_id="org",
+                                organization_id=organization_id,
                                 sku_id=_optional_str(offer, "sku_id"),
                                 warehouse_id=_optional_str(offer, "destination_warehouse_id"),
                                 supplier_id=_optional_str(offer, "supplier_id"),
@@ -182,7 +209,7 @@ class ConcurrentExecutionRefresher:
                             unit=str(offer.get("unit_of_measure", "unit")),
                             valid_at=result.observed_at,
                             scope=ClaimScope(
-                                organization_id="org",
+                                organization_id=organization_id,
                                 sku_id=_optional_str(offer, "sku_id"),
                                 warehouse_id=_optional_str(offer, "destination_warehouse_id"),
                                 supplier_id=_optional_str(offer, "supplier_id"),
@@ -204,7 +231,7 @@ class ConcurrentExecutionRefresher:
                         unit="day",
                         valid_at=result.observed_at,
                         scope=ClaimScope(
-                            organization_id="org",
+                            organization_id=organization_id,
                             sku_id=_optional_str(record, "sku_id"),
                             warehouse_id=_optional_str(record, "destination_warehouse_id"),
                             supplier_id=_optional_str(record, "supplier_id"),
@@ -215,7 +242,9 @@ class ConcurrentExecutionRefresher:
         elif call.tool_name == "get_warehouse_capacity":
             for record in _records(result.payload, "records"):
                 key = f"{record.get('warehouse_id')}:{record.get('sku_id')}"
-                constraints[f"warehouse:{key}"] = Decimal(str(record.get("available_quantity", "0")))
+                constraints[f"warehouse:{key}"] = Decimal(
+                    str(record.get("available_quantity", "0"))
+                )
                 claims.append(
                     TypedClaim(
                         claim_id=self._ids.new_id("claim"),
@@ -225,7 +254,7 @@ class ConcurrentExecutionRefresher:
                         unit=str(record.get("unit_of_measure", "unit")),
                         valid_at=result.observed_at,
                         scope=ClaimScope(
-                            organization_id="org",
+                            organization_id=organization_id,
                             sku_id=_optional_str(record, "sku_id"),
                             warehouse_id=_optional_str(record, "warehouse_id"),
                         ),
@@ -247,7 +276,7 @@ class ConcurrentExecutionRefresher:
                         unit=str(record.get("unit_of_measure", "unit")),
                         valid_at=result.observed_at,
                         scope=ClaimScope(
-                            organization_id="org",
+                            organization_id=organization_id,
                             sku_id=_optional_str(record, "sku_id"),
                             warehouse_id=_optional_str(record, "source_warehouse_id"),
                         ),
@@ -282,167 +311,224 @@ class GuardedExecutionService:
         self._jury = JuryEvaluator(integrity_policy)
 
     async def execute(self, request: ExecutionRequest) -> GuardedExecutionOutcome:
-        async with self._sessions() as session:
-            async with session.begin():
-                duplicate = await session.scalar(
-                    select(ExecutionAuditModel).where(
-                        ExecutionAuditModel.idempotency_key == request.idempotency_key
+        async with self._sessions() as session, session.begin():
+            planning_run = await session.get(PlanningRunModel, request.planning_run_id)
+            if planning_run is None:
+                raise ValueError("planning run not found")
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(
+                            f"{planning_run.organization_id}:{request.idempotency_key}", 0
+                        )
                     )
                 )
-                if duplicate is not None:
-                    return GuardedExecutionOutcome(
-                        result=ExecutionResult(
-                            execution_id=duplicate.id,
-                            state=ExecutionState.DUPLICATE,
-                            attempted_at=duplicate.attempted_at or duplicate.requested_at,
-                            completed_at=duplicate.completed_at,
-                            external_references=tuple(duplicate.external_references),
-                            failure_code=duplicate.failure_code,
-                            detail="duplicate idempotency key",
-                        ),
-                        decision="duplicate",
-                    )
-
-                planning_run = await session.get(PlanningRunModel, request.planning_run_id)
-                if planning_run is None:
-                    raise ValueError("planning run not found")
-                plan = await _load_plan(session, request.approved_plan_id)
-                if plan is None:
-                    raise ValueError("approved plan not found")
-                jury_decision = await session.get(JuryDecisionModel, request.jury_evaluation_id)
-                if jury_decision is None:
-                    raise ValueError("jury evaluation not found")
-                if jury_decision.final_state != JuryState.APPROVE.value:
-                    now = self._clock.now()
-                    return GuardedExecutionOutcome(
-                        result=ExecutionResult(
-                            execution_id=request.execution_id,
-                            state=ExecutionState.FAILED,
-                            attempted_at=now,
-                            completed_at=now,
-                            failure_code="jury_not_approved",
-                            detail="execution requires an approved jury decision",
-                        ),
-                        decision="investigate",
-                        reasons=("jury_not_approved",),
-                    )
-
-                audit = ExecutionAuditModel(
-                    id=request.execution_id,
-                    organization_id=planning_run.organization_id,
-                    planning_run_id=request.planning_run_id,
-                    approved_plan_id=request.approved_plan_id,
-                    jury_decision_id=request.jury_evaluation_id,
-                    idempotency_key=request.idempotency_key,
-                    approval_policy_version=request.approval_policy_version,
-                    action=request.action,
-                    state=ExecutionState.PENDING.value,
-                    requested_at=request.requested_at,
-                    attempted_at=self._clock.now(),
-                    completed_at=None,
-                    failure_code=None,
-                    compensation_status=None,
-                    external_references=[],
+            )
+            duplicate = await session.scalar(
+                select(ExecutionAuditModel).where(
+                    ExecutionAuditModel.organization_id == planning_run.organization_id,
+                    ExecutionAuditModel.idempotency_key == request.idempotency_key,
                 )
-                session.add(audit)
+            )
+            if duplicate is not None:
+                if (
+                    duplicate.planning_run_id != request.planning_run_id
+                    or duplicate.approved_plan_id != request.approved_plan_id
+                    or duplicate.jury_decision_id != request.jury_evaluation_id
+                    or duplicate.approval_policy_version != request.approval_policy_version
+                    or duplicate.action != request.action
+                ):
+                    raise ValueError("idempotency key was reused for a different execution request")
+                return GuardedExecutionOutcome(
+                    result=ExecutionResult(
+                        execution_id=duplicate.id,
+                        state=ExecutionState.DUPLICATE,
+                        attempted_at=duplicate.attempted_at or duplicate.requested_at,
+                        completed_at=duplicate.completed_at,
+                        external_references=tuple(duplicate.external_references),
+                        failure_code=duplicate.failure_code,
+                        detail="duplicate idempotency key",
+                    ),
+                    decision="duplicate",
+                )
 
-                refresh = await self._refresher.refresh(request=request, plan=plan)
-                readiness = self._assess_readiness(request, plan, refresh)
-                if readiness.decision != "execute":
-                    audit.state = ExecutionState.FAILED.value
-                    audit.failure_code = readiness.result.failure_code
-                    audit.completed_at = readiness.result.completed_at
-                    return readiness
-
-                inventory = InventoryService(session)
-                try:
-                    for line in plan.distribution:
-                        await inventory.reserve_fefo(
-                            organization_id=planning_run.organization_id,
-                            sku_id=line.sku_id,
-                            warehouse_id=line.source_warehouse_id,
-                            quantity=line.quantity.value,
-                            occurred_at=self._clock.now(),
-                            business_reference=request.execution_id,
-                            idempotency_key=(
-                                f"{request.idempotency_key}:"
-                                f"{line.sku_id}:{line.source_warehouse_id}"
-                            ),
-                        )
-                except (DuplicateReservation, InsufficientInventory) as error:
-                    now = self._clock.now()
-                    audit.state = ExecutionState.FAILED.value
-                    audit.failure_code = "inventory_reservation_failed"
-                    audit.completed_at = now
-                    return GuardedExecutionOutcome(
-                        result=ExecutionResult(
-                            execution_id=request.execution_id,
-                            state=ExecutionState.FAILED,
-                            attempted_at=audit.attempted_at or request.requested_at,
-                            completed_at=now,
-                            failure_code="inventory_reservation_failed",
-                            detail=str(error),
-                        ),
-                        decision="investigate",
-                        reasons=("inventory_reservation_failed",),
-                        required_investigation=("Revalidate inventory availability.",),
-                    )
-
-                external_references: list[str] = []
-                try:
-                    for supplier_id, lines in _group_procurement_lines(plan).items():
-                        result = await self._mcp.invoke(
-                            MCPToolCall(
-                                call_id=self._ids.new_id("mcp"),
-                                server_name=self._server_name,
-                                tool_name="create_procurement_order",
-                                arguments={
-                                    "planning_run_id": request.planning_run_id,
-                                    "supplier_id": supplier_id,
-                                    "lines": lines,
-                                },
-                                access_mode=MCPAccessMode.WRITE,
-                                idempotency_key=f"{request.idempotency_key}:{supplier_id}",
-                            )
-                        )
-                        order_id = result.payload.get("order_id")
-                        if isinstance(order_id, str):
-                            external_references.append(order_id)
-                except Exception:
-                    now = self._clock.now()
-                    audit.state = ExecutionState.COMPENSATION_REQUIRED.value
-                    audit.failure_code = "provider_write_failed"
-                    audit.compensation_status = "required"
-                    audit.external_references = external_references
-                    audit.completed_at = now
-                    return GuardedExecutionOutcome(
-                        result=ExecutionResult(
-                            execution_id=request.execution_id,
-                            state=ExecutionState.COMPENSATION_REQUIRED,
-                            attempted_at=audit.attempted_at or request.requested_at,
-                            completed_at=now,
-                            external_references=tuple(external_references),
-                            failure_code="provider_write_failed",
-                            detail="execution wrote partial external state",
-                        ),
-                        decision="compensate",
-                        reasons=("provider_write_failed",),
-                    )
-
+            if planning_run.status != JuryState.APPROVE.value:
+                raise ValueError("planning run is not approved")
+            if request.approval_policy_version != "approval-v1":
+                raise ValueError("unsupported approval policy version")
+            plan_row = await session.get(CandidatePlanModel, request.approved_plan_id)
+            if plan_row is None:
+                raise ValueError("approved plan not found")
+            if plan_row.planning_run_id != planning_run.id:
+                raise ValueError("approved plan does not belong to the planning run")
+            if not plan_row.selected:
+                raise ValueError("approved plan was not selected")
+            if plan_row.feasibility == FeasibilityStatus.INFEASIBLE.value:
+                raise ValueError("infeasible plans cannot be executed")
+            plan = await _load_plan(session, request.approved_plan_id)
+            if plan is None:
+                raise ValueError("approved plan not found")
+            await _validate_plan_organization(session, plan, planning_run.organization_id)
+            jury_decision = await session.get(JuryDecisionModel, request.jury_evaluation_id)
+            if jury_decision is None:
+                raise ValueError("jury evaluation not found")
+            if (
+                jury_decision.planning_run_id != planning_run.id
+                or jury_decision.plan_id != plan.plan_id
+            ):
+                raise ValueError("jury evaluation does not approve this planning run and plan")
+            if jury_decision.policy_version != self._jury.policy.version:
+                raise ValueError("jury evaluation uses an unsupported integrity policy")
+            if not jury_decision.gate_results or any(
+                not bool(gate.get("passed")) for gate in jury_decision.gate_results
+            ):
+                raise ValueError("jury evaluation has missing or failed hard gates")
+            recorded_gate_codes = {
+                str(gate.get("gate_code")) for gate in jury_decision.gate_results
+            }
+            if not recorded_gate_codes >= REQUIRED_JURY_GATES:
+                raise ValueError("jury evaluation does not contain every required hard gate")
+            if Decimal(jury_decision.integrity_score) < Decimal(
+                str(self._jury.policy.approval_threshold)
+            ):
+                raise ValueError("jury evaluation is below the approval threshold")
+            dissent_score = jury_decision.component_scores.get("dissent_robustness")
+            if not isinstance(dissent_score, (int, float)) or dissent_score <= 0:
+                raise ValueError("jury evaluation lacks a completed Dissent attestation")
+            if jury_decision.final_state != JuryState.APPROVE.value:
                 now = self._clock.now()
-                audit.state = ExecutionState.SUCCEEDED.value
+                return GuardedExecutionOutcome(
+                    result=ExecutionResult(
+                        execution_id=request.execution_id,
+                        state=ExecutionState.FAILED,
+                        attempted_at=now,
+                        completed_at=now,
+                        failure_code="jury_not_approved",
+                        detail="execution requires an approved jury decision",
+                    ),
+                    decision="investigate",
+                    reasons=("jury_not_approved",),
+                )
+
+            audit = ExecutionAuditModel(
+                id=request.execution_id,
+                organization_id=planning_run.organization_id,
+                planning_run_id=request.planning_run_id,
+                approved_plan_id=request.approved_plan_id,
+                jury_decision_id=request.jury_evaluation_id,
+                idempotency_key=request.idempotency_key,
+                approval_policy_version=request.approval_policy_version,
+                action=request.action,
+                state=ExecutionState.PENDING.value,
+                requested_at=request.requested_at,
+                attempted_at=self._clock.now(),
+                completed_at=None,
+                failure_code=None,
+                compensation_status=None,
+                external_references=[],
+            )
+            session.add(audit)
+
+            refresh = await self._refresher.refresh(
+                request=request,
+                plan=plan,
+                organization_id=planning_run.organization_id,
+            )
+            readiness = self._assess_readiness(request, plan, refresh)
+            if readiness.decision != "execute":
+                audit.state = ExecutionState.FAILED.value
+                audit.failure_code = readiness.result.failure_code
+                audit.completed_at = readiness.result.completed_at
+                return readiness
+
+            inventory = InventoryService(session)
+            try:
+                for line in plan.distribution:
+                    await inventory.reserve_fefo(
+                        organization_id=planning_run.organization_id,
+                        sku_id=line.sku_id,
+                        warehouse_id=line.source_warehouse_id,
+                        quantity=line.quantity.value,
+                        occurred_at=self._clock.now(),
+                        business_reference=request.execution_id,
+                        idempotency_key=(
+                            f"{request.idempotency_key}:{line.sku_id}:{line.source_warehouse_id}"
+                        ),
+                    )
+            except (DuplicateReservation, InsufficientInventory) as error:
+                now = self._clock.now()
+                audit.state = ExecutionState.FAILED.value
+                audit.failure_code = "inventory_reservation_failed"
+                audit.completed_at = now
+                return GuardedExecutionOutcome(
+                    result=ExecutionResult(
+                        execution_id=request.execution_id,
+                        state=ExecutionState.FAILED,
+                        attempted_at=audit.attempted_at or request.requested_at,
+                        completed_at=now,
+                        failure_code="inventory_reservation_failed",
+                        detail=str(error),
+                    ),
+                    decision="investigate",
+                    reasons=("inventory_reservation_failed",),
+                    required_investigation=("Revalidate inventory availability.",),
+                )
+
+            external_references: list[str] = []
+            try:
+                for supplier_id, lines in _group_procurement_lines(plan).items():
+                    result = await self._mcp.invoke(
+                        MCPToolCall(
+                            call_id=self._ids.new_id("mcp"),
+                            server_name=self._server_name,
+                            tool_name="create_procurement_order",
+                            arguments={
+                                "planning_run_id": request.planning_run_id,
+                                "supplier_id": supplier_id,
+                                "lines": lines,
+                            },
+                            access_mode=MCPAccessMode.WRITE,
+                            idempotency_key=f"{request.idempotency_key}:{supplier_id}",
+                        )
+                    )
+                    order_id = result.payload.get("order_id")
+                    if isinstance(order_id, str):
+                        external_references.append(order_id)
+            except Exception:
+                now = self._clock.now()
+                audit.state = ExecutionState.COMPENSATION_REQUIRED.value
+                audit.failure_code = "provider_write_failed"
+                audit.compensation_status = "required"
                 audit.external_references = external_references
                 audit.completed_at = now
                 return GuardedExecutionOutcome(
                     result=ExecutionResult(
                         execution_id=request.execution_id,
-                        state=ExecutionState.SUCCEEDED,
+                        state=ExecutionState.COMPENSATION_REQUIRED,
                         attempted_at=audit.attempted_at or request.requested_at,
                         completed_at=now,
                         external_references=tuple(external_references),
+                        failure_code="provider_write_failed",
+                        detail="execution wrote partial external state",
                     ),
-                    decision="execute",
+                    decision="compensate",
+                    reasons=("provider_write_failed",),
                 )
+
+            now = self._clock.now()
+            audit.state = ExecutionState.SUCCEEDED.value
+            audit.external_references = external_references
+            audit.completed_at = now
+            return GuardedExecutionOutcome(
+                result=ExecutionResult(
+                    execution_id=request.execution_id,
+                    state=ExecutionState.SUCCEEDED,
+                    attempted_at=audit.attempted_at or request.requested_at,
+                    completed_at=now,
+                    external_references=tuple(external_references),
+                ),
+                decision="execute",
+            )
 
     def _assess_readiness(
         self,
@@ -490,12 +576,20 @@ class GuardedExecutionService:
                 required.append(f"Regenerate solver plan for supplier offer {key}.")
                 continue
             refreshed_total += unit_price * line.quantity.value
-        for line in plan.distribution:
-            warehouse_key = f"warehouse:{line.destination_warehouse_id}:{line.sku_id}"
-            if refresh.constraints.get(warehouse_key, Decimal("0")) < line.quantity.value:
+        for distribution_line in plan.distribution:
+            warehouse_key = (
+                f"warehouse:{distribution_line.destination_warehouse_id}:{distribution_line.sku_id}"
+            )
+            if (
+                refresh.constraints.get(warehouse_key, Decimal("0"))
+                < distribution_line.quantity.value
+            ):
                 required.append(f"Regenerate solver plan for warehouse capacity {warehouse_key}.")
-            transport_key = f"transport:{_transport_key_from_line(line)}"
-            if refresh.constraints.get(transport_key, Decimal("0")) < line.quantity.value:
+            transport_key = f"transport:{_transport_key_from_line(distribution_line)}"
+            if (
+                refresh.constraints.get(transport_key, Decimal("0"))
+                < distribution_line.quantity.value
+            ):
                 required.append(f"Regenerate solver plan for transport lane {transport_key}.")
         if required:
             return GuardedExecutionOutcome(
@@ -525,6 +619,24 @@ class GuardedExecutionService:
                 reasons=("approved_total_exceeded",),
             )
 
+        dissent_protocol = DissentProtocol()
+        dissent = dissent_protocol.record_plan(
+            DissentInvestigationPlan(
+                context_id="execution-integrity-revalidation",
+                memory_namespace="execution-integrity-memory",
+                tool_cache_namespace="execution-integrity-cache",
+                checks=("carry forward approved Dissent and refresh mutable execution facts",),
+                tool_budget=max(1, len(refresh.evidence)),
+            )
+        )
+        dissent = dissent_protocol.record_fresh_retrieval(
+            dissent,
+            evidence_ids=tuple(record.evidence_id for record in refresh.evidence),
+        )
+        dissent = dissent_protocol.compare_with_existing_graph(
+            dissent,
+            checked_claim_ids=tuple(claim.claim_id for claim in refresh.claims),
+        )
         evaluation = self._jury.evaluate(
             JuryRequest(
                 planning_run_id=request.planning_run_id,
@@ -536,18 +648,7 @@ class GuardedExecutionService:
             JuryInputs(
                 claims=refresh.claims,
                 evidence=refresh.evidence,
-                dissent=DissentReport(
-                    plan=DissentInvestigationPlan(
-                        context_id="execution-dissent",
-                        memory_namespace="execution-dissent-memory",
-                        tool_cache_namespace="execution-dissent-cache",
-                        checks=("final refresh",),
-                        tool_budget=1,
-                    ),
-                    phase=DissentPhase.COMPARISON_COMPLETE,
-                    fresh_evidence_ids=tuple(record.evidence_id for record in refresh.evidence),
-                    checked_claim_ids=tuple(claim.claim_id for claim in refresh.claims),
-                ),
+                dissent=dissent,
                 gate_facts=GateFacts(stale_execution_claim_ids=stale_claim_ids),
             ),
             evaluation_id=self._ids.new_id("jury"),
@@ -582,7 +683,9 @@ async def _load_plan(session: AsyncSession, plan_id: str) -> CandidatePlan | Non
     if plan_row is None:
         return None
     procurement_rows = (
-        await session.scalars(select(ProcurementLineModel).where(ProcurementLineModel.plan_id == plan_id))
+        await session.scalars(
+            select(ProcurementLineModel).where(ProcurementLineModel.plan_id == plan_id)
+        )
     ).all()
     distribution_rows = (
         await session.scalars(
@@ -620,6 +723,70 @@ async def _load_plan(session: AsyncSession, plan_id: str) -> CandidatePlan | Non
         metrics={key: Decimal(str(value)) for key, value in plan_row.metrics.items()},
         solver_version=plan_row.solver_version,
     )
+
+
+async def _validate_plan_organization(
+    session: AsyncSession,
+    plan: CandidatePlan,
+    organization_id: str,
+) -> None:
+    """Reject cross-tenant object references before reserving or writing externally."""
+
+    supplier_ids = {line.supplier_id for line in plan.procurement}
+    sku_ids = {line.sku_id for line in plan.procurement}
+    sku_ids.update(line.sku_id for line in plan.distribution)
+    warehouse_ids = {
+        warehouse_id
+        for line in plan.procurement
+        for warehouse_id in (line.destination_warehouse_id,)
+    }
+    warehouse_ids.update(
+        warehouse_id
+        for line in plan.distribution
+        for warehouse_id in (line.source_warehouse_id, line.destination_warehouse_id)
+    )
+    lot_ids = {lot_id for line in plan.distribution for lot_id in line.source_lot_ids}
+
+    owned_supplier_ids = set(
+        await session.scalars(
+            select(SupplierModel.id).where(
+                SupplierModel.id.in_(supplier_ids),
+                SupplierModel.organization_id == organization_id,
+            )
+        )
+    )
+    owned_sku_ids = set(
+        await session.scalars(
+            select(SKUModel.id).where(
+                SKUModel.id.in_(sku_ids),
+                SKUModel.organization_id == organization_id,
+            )
+        )
+    )
+    owned_warehouse_ids = set(
+        await session.scalars(
+            select(WarehouseModel.id).where(
+                WarehouseModel.id.in_(warehouse_ids),
+                WarehouseModel.organization_id == organization_id,
+            )
+        )
+    )
+    owned_lot_ids = set(
+        await session.scalars(
+            select(InventoryLotModel.id).where(
+                InventoryLotModel.id.in_(lot_ids),
+                InventoryLotModel.organization_id == organization_id,
+            )
+        )
+    )
+    for owned, expected, label in (
+        (owned_supplier_ids, supplier_ids, "supplier"),
+        (owned_sku_ids, sku_ids, "SKU"),
+        (owned_warehouse_ids, warehouse_ids, "warehouse"),
+        (owned_lot_ids, lot_ids, "inventory lot"),
+    ):
+        if owned != expected:
+            raise ValueError(f"plan contains an unknown or cross-organization {label}")
 
 
 def _group_procurement_lines(plan: CandidatePlan) -> dict[str, list[dict[str, Any]]]:

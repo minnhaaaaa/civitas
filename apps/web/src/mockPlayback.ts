@@ -158,7 +158,8 @@ const jury: JuryCycleSnapshot[] = [
     cycle: 1,
     state: "investigate",
     integrity_score: 41,
-    summary: "Consensus formed quickly, but most support collapses to one stale supplier source plus an agent echo.",
+    summary:
+      "Consensus formed quickly, but most support collapses to one stale supplier source plus an agent echo.",
     reasons: [
       "Critical lead-time support is not independent.",
       "Dissent found a contradictory live audit for supplier A.",
@@ -174,9 +175,21 @@ const jury: JuryCycleSnapshot[] = [
       dissent_robustness: 70,
     },
     gates: [
-      { gate_code: "critical-claim-support", passed: false, reason_codes: ["critical_claim_missing_external_support"] },
-      { gate_code: "high-severity-contradiction", passed: false, reason_codes: ["supplier_a_live_lead_time_conflict"] },
-      { gate_code: "execution-freshness", passed: false, reason_codes: ["lead_time_evidence_stale"] },
+      {
+        gate_code: "critical-claim-support",
+        passed: false,
+        reason_codes: ["critical_claim_missing_external_support"],
+      },
+      {
+        gate_code: "high-severity-contradiction",
+        passed: false,
+        reason_codes: ["supplier_a_live_lead_time_conflict"],
+      },
+      {
+        gate_code: "execution-freshness",
+        passed: false,
+        reason_codes: ["lead_time_evidence_stale"],
+      },
     ],
     required_investigation: [
       "Verify current supplier lead time from an independent source.",
@@ -187,7 +200,8 @@ const jury: JuryCycleSnapshot[] = [
     cycle: 2,
     state: "approve",
     integrity_score: 91,
-    summary: "Replanning replaces shared stale support with fresh offer and audit evidence for supplier B.",
+    summary:
+      "Replanning replaces shared stale support with fresh offer and audit evidence for supplier B.",
     reasons: [
       "Supplier B now has independent public and audit support.",
       "No unresolved contradiction remains on the critical lead-time claim.",
@@ -215,29 +229,161 @@ const evidenceGraphs: EvidenceGraphSnapshot[] = [
   {
     cycle: 1,
     nodes: [
-      { id: "source-a", position: { x: 40, y: 80 }, data: { label: "Supplier A master", kind: "source", detail: "Shared public source", shared: true } },
-      { id: "source-inventory", position: { x: 40, y: 260 }, data: { label: "Inventory ledger", kind: "source", detail: "Warehouse north balance" } },
-      { id: "evidence-a", position: { x: 280, y: 70 }, data: { label: "Stale offer", kind: "evidence", detail: "Lead time 1 day + cheapest price", shared: true, contradicted: true } },
-      { id: "echo-a", position: { x: 280, y: 170 }, data: { label: "Agent echo", kind: "evidence", detail: "Cost agent repeated A's assumption", shared: true } },
-      { id: "claim-a", position: { x: 540, y: 70 }, data: { label: "Lead time claim", kind: "claim", detail: "Supplier A can arrive day one", shared: true, contradicted: true } },
-      { id: "claim-price", position: { x: 540, y: 170 }, data: { label: "Unit price claim", kind: "claim", detail: "Supplier A is cheapest", shared: true } },
-      { id: "dissent-source", position: { x: 40, y: 430 }, data: { label: "Partner audit", kind: "source", detail: "Clean-room retrieval", cleanRoom: true } },
-      { id: "dissent-evidence", position: { x: 280, y: 430 }, data: { label: "Live audit", kind: "evidence", detail: "Supplier A lead time is 10 days", cleanRoom: true, contradicted: true } },
-      { id: "dissent-claim", position: { x: 540, y: 430 }, data: { label: "Contradiction", kind: "claim", detail: "Supplier A is not day-one feasible", cleanRoom: true, contradicted: true } },
-      { id: "agents", position: { x: 820, y: 120 }, data: { label: "Parliament bloc", kind: "agent", detail: "5 agents converge on Supplier A" } },
-      { id: "jury", position: { x: 820, y: 350 }, data: { label: "Jury gate", kind: "decision", detail: "State: investigate", contradicted: true } },
+      {
+        id: "source-a",
+        position: { x: 40, y: 80 },
+        data: {
+          label: "Supplier A master",
+          kind: "source",
+          detail: "Shared public source",
+          shared: true,
+        },
+      },
+      {
+        id: "source-inventory",
+        position: { x: 40, y: 260 },
+        data: { label: "Inventory ledger", kind: "source", detail: "Warehouse north balance" },
+      },
+      {
+        id: "evidence-a",
+        position: { x: 280, y: 70 },
+        data: {
+          label: "Stale offer",
+          kind: "evidence",
+          detail: "Lead time 1 day + cheapest price",
+          shared: true,
+          contradicted: true,
+        },
+      },
+      {
+        id: "echo-a",
+        position: { x: 280, y: 170 },
+        data: {
+          label: "Agent echo",
+          kind: "evidence",
+          detail: "Cost agent repeated A's assumption",
+          shared: true,
+        },
+      },
+      {
+        id: "claim-a",
+        position: { x: 540, y: 70 },
+        data: {
+          label: "Lead time claim",
+          kind: "claim",
+          detail: "Supplier A can arrive day one",
+          shared: true,
+          contradicted: true,
+        },
+      },
+      {
+        id: "claim-price",
+        position: { x: 540, y: 170 },
+        data: {
+          label: "Unit price claim",
+          kind: "claim",
+          detail: "Supplier A is cheapest",
+          shared: true,
+        },
+      },
+      {
+        id: "dissent-source",
+        position: { x: 40, y: 430 },
+        data: {
+          label: "Partner audit",
+          kind: "source",
+          detail: "Clean-room retrieval",
+          cleanRoom: true,
+        },
+      },
+      {
+        id: "dissent-evidence",
+        position: { x: 280, y: 430 },
+        data: {
+          label: "Live audit",
+          kind: "evidence",
+          detail: "Supplier A lead time is 10 days",
+          cleanRoom: true,
+          contradicted: true,
+        },
+      },
+      {
+        id: "dissent-claim",
+        position: { x: 540, y: 430 },
+        data: {
+          label: "Contradiction",
+          kind: "claim",
+          detail: "Supplier A is not day-one feasible",
+          cleanRoom: true,
+          contradicted: true,
+        },
+      },
+      {
+        id: "agents",
+        position: { x: 820, y: 120 },
+        data: {
+          label: "Parliament bloc",
+          kind: "agent",
+          detail: "5 agents converge on Supplier A",
+        },
+      },
+      {
+        id: "jury",
+        position: { x: 820, y: 350 },
+        data: {
+          label: "Jury gate",
+          kind: "decision",
+          detail: "State: investigate",
+          contradicted: true,
+        },
+      },
     ],
     edges: [
-      { id: "s1", source: "source-a", target: "evidence-a", data: { kind: "retrieved_from", shared: true } },
-      { id: "s2", source: "evidence-a", target: "echo-a", data: { kind: "derived_from", shared: true } },
-      { id: "s3", source: "evidence-a", target: "claim-a", data: { kind: "supports", shared: true } },
-      { id: "s4", source: "evidence-a", target: "claim-price", data: { kind: "supports", shared: true } },
+      {
+        id: "s1",
+        source: "source-a",
+        target: "evidence-a",
+        data: { kind: "retrieved_from", shared: true },
+      },
+      {
+        id: "s2",
+        source: "evidence-a",
+        target: "echo-a",
+        data: { kind: "derived_from", shared: true },
+      },
+      {
+        id: "s3",
+        source: "evidence-a",
+        target: "claim-a",
+        data: { kind: "supports", shared: true },
+      },
+      {
+        id: "s4",
+        source: "evidence-a",
+        target: "claim-price",
+        data: { kind: "supports", shared: true },
+      },
       { id: "s5", source: "echo-a", target: "claim-a", data: { kind: "supports", shared: true } },
       { id: "s6", source: "source-inventory", target: "agents", data: { kind: "used_in" } },
       { id: "s7", source: "claim-a", target: "agents", data: { kind: "used_in", shared: true } },
-      { id: "s8", source: "claim-price", target: "agents", data: { kind: "used_in", shared: true } },
-      { id: "s9", source: "dissent-source", target: "dissent-evidence", data: { kind: "retrieved_from" } },
-      { id: "s10", source: "dissent-evidence", target: "dissent-claim", data: { kind: "supports" } },
+      {
+        id: "s8",
+        source: "claim-price",
+        target: "agents",
+        data: { kind: "used_in", shared: true },
+      },
+      {
+        id: "s9",
+        source: "dissent-source",
+        target: "dissent-evidence",
+        data: { kind: "retrieved_from" },
+      },
+      {
+        id: "s10",
+        source: "dissent-evidence",
+        target: "dissent-claim",
+        data: { kind: "supports" },
+      },
       { id: "s11", source: "dissent-claim", target: "claim-a", data: { kind: "contradicts" } },
       { id: "s12", source: "agents", target: "jury", data: { kind: "used_in" } },
       { id: "s13", source: "dissent-claim", target: "jury", data: { kind: "used_in" } },
@@ -246,25 +392,103 @@ const evidenceGraphs: EvidenceGraphSnapshot[] = [
   {
     cycle: 2,
     nodes: [
-      { id: "source-b-offer", position: { x: 40, y: 90 }, data: { label: "Supplier B live offer", kind: "source", detail: "Fresh public offer" } },
-      { id: "source-b-audit", position: { x: 40, y: 300 }, data: { label: "Supplier B audit", kind: "source", detail: "Independent public audit" } },
-      { id: "source-dissent-b", position: { x: 40, y: 510 }, data: { label: "Clean-room audit", kind: "source", detail: "Dissent re-check", cleanRoom: true } },
-      { id: "evidence-b-offer", position: { x: 300, y: 80 }, data: { label: "Live offer evidence", kind: "evidence", detail: "Price 7, arrival day one" } },
-      { id: "evidence-b-audit", position: { x: 300, y: 300 }, data: { label: "Audit evidence", kind: "evidence", detail: "Lead time confirmed at 1 day" } },
-      { id: "evidence-b-dissent", position: { x: 300, y: 510 }, data: { label: "Dissent evidence", kind: "evidence", detail: "Independent clean-room confirmation", cleanRoom: true } },
-      { id: "claim-b-lead", position: { x: 560, y: 220 }, data: { label: "Lead time claim", kind: "claim", detail: "Supplier B is day-one feasible" } },
-      { id: "claim-b-price", position: { x: 560, y: 80 }, data: { label: "Price claim", kind: "claim", detail: "Supplier B costs more but is valid" } },
-      { id: "agents-b", position: { x: 830, y: 160 }, data: { label: "Parliament convergence", kind: "agent", detail: "Solver comparison favors Supplier B" } },
-      { id: "jury-b", position: { x: 830, y: 380 }, data: { label: "Jury approve", kind: "decision", detail: "Integrity 91, all gates passed" } },
+      {
+        id: "source-b-offer",
+        position: { x: 40, y: 90 },
+        data: { label: "Supplier B live offer", kind: "source", detail: "Fresh public offer" },
+      },
+      {
+        id: "source-b-audit",
+        position: { x: 40, y: 300 },
+        data: { label: "Supplier B audit", kind: "source", detail: "Independent public audit" },
+      },
+      {
+        id: "source-dissent-b",
+        position: { x: 40, y: 510 },
+        data: {
+          label: "Clean-room audit",
+          kind: "source",
+          detail: "Dissent re-check",
+          cleanRoom: true,
+        },
+      },
+      {
+        id: "evidence-b-offer",
+        position: { x: 300, y: 80 },
+        data: {
+          label: "Live offer evidence",
+          kind: "evidence",
+          detail: "Price 7, arrival day one",
+        },
+      },
+      {
+        id: "evidence-b-audit",
+        position: { x: 300, y: 300 },
+        data: { label: "Audit evidence", kind: "evidence", detail: "Lead time confirmed at 1 day" },
+      },
+      {
+        id: "evidence-b-dissent",
+        position: { x: 300, y: 510 },
+        data: {
+          label: "Dissent evidence",
+          kind: "evidence",
+          detail: "Independent clean-room confirmation",
+          cleanRoom: true,
+        },
+      },
+      {
+        id: "claim-b-lead",
+        position: { x: 560, y: 220 },
+        data: { label: "Lead time claim", kind: "claim", detail: "Supplier B is day-one feasible" },
+      },
+      {
+        id: "claim-b-price",
+        position: { x: 560, y: 80 },
+        data: { label: "Price claim", kind: "claim", detail: "Supplier B costs more but is valid" },
+      },
+      {
+        id: "agents-b",
+        position: { x: 830, y: 160 },
+        data: {
+          label: "Parliament convergence",
+          kind: "agent",
+          detail: "Solver comparison favors Supplier B",
+        },
+      },
+      {
+        id: "jury-b",
+        position: { x: 830, y: 380 },
+        data: { label: "Jury approve", kind: "decision", detail: "Integrity 91, all gates passed" },
+      },
     ],
     edges: [
-      { id: "b1", source: "source-b-offer", target: "evidence-b-offer", data: { kind: "retrieved_from" } },
-      { id: "b2", source: "source-b-audit", target: "evidence-b-audit", data: { kind: "retrieved_from" } },
-      { id: "b3", source: "source-dissent-b", target: "evidence-b-dissent", data: { kind: "retrieved_from" } },
+      {
+        id: "b1",
+        source: "source-b-offer",
+        target: "evidence-b-offer",
+        data: { kind: "retrieved_from" },
+      },
+      {
+        id: "b2",
+        source: "source-b-audit",
+        target: "evidence-b-audit",
+        data: { kind: "retrieved_from" },
+      },
+      {
+        id: "b3",
+        source: "source-dissent-b",
+        target: "evidence-b-dissent",
+        data: { kind: "retrieved_from" },
+      },
       { id: "b4", source: "evidence-b-offer", target: "claim-b-price", data: { kind: "supports" } },
       { id: "b5", source: "evidence-b-offer", target: "claim-b-lead", data: { kind: "supports" } },
       { id: "b6", source: "evidence-b-audit", target: "claim-b-lead", data: { kind: "supports" } },
-      { id: "b7", source: "evidence-b-dissent", target: "claim-b-lead", data: { kind: "supports" } },
+      {
+        id: "b7",
+        source: "evidence-b-dissent",
+        target: "claim-b-lead",
+        data: { kind: "supports" },
+      },
       { id: "b8", source: "claim-b-price", target: "agents-b", data: { kind: "used_in" } },
       { id: "b9", source: "claim-b-lead", target: "agents-b", data: { kind: "used_in" } },
       { id: "b10", source: "agents-b", target: "jury-b", data: { kind: "used_in" } },
@@ -275,7 +499,8 @@ const evidenceGraphs: EvidenceGraphSnapshot[] = [
 const execution: ExecutionSnapshot = {
   approved_plan_id: `${runId}-risk-01`,
   current_state: "duplicate",
-  detail: "The approved write succeeds once. The repeated write is downgraded by idempotency protection.",
+  detail:
+    "The approved write succeeds once. The repeated write is downgraded by idempotency protection.",
   freshness_ttls: [
     { label: "Inventory balances", ttl: "2 min", state: "fresh" },
     { label: "Warehouse capacity", ttl: "2 min", state: "fresh" },
@@ -284,9 +509,21 @@ const execution: ExecutionSnapshot = {
   ],
   steps: [
     { label: "Jury approval", state: "approved", detail: "Cycle 2 plan cleared every hard gate." },
-    { label: "Freshness revalidation", state: "succeeded", detail: "Mutable inputs were refreshed before write." },
-    { label: "Execution write", state: "succeeded", detail: "Procurement order was created for Supplier B." },
-    { label: "Duplicate retry", state: "duplicate", detail: "Second write attempt was blocked by the execution ledger." },
+    {
+      label: "Freshness revalidation",
+      state: "succeeded",
+      detail: "Mutable inputs were refreshed before write.",
+    },
+    {
+      label: "Execution write",
+      state: "succeeded",
+      detail: "Procurement order was created for Supplier B.",
+    },
+    {
+      label: "Duplicate retry",
+      state: "duplicate",
+      detail: "Second write attempt was blocked by the execution ledger.",
+    },
   ],
 };
 
@@ -316,16 +553,23 @@ const events: SseEnvelope[] = [
     summary: "Supplier A appears to arrive in 1 day at the cheapest price.",
     note: "Shared supplier-offer evidence made supplier A look immediately feasible.",
   }),
-  createEvent(runId, 4, "evidence.recorded", "2026-08-27T10:30:05Z", {
-    phase: "evidence",
-    cycle: 1,
-    evidence_id: "evidence.supplier_a.echo",
-    claim_ids: ["claim.supplier_a.lead_time"],
-    origin: "agent_derived",
-    source_group: "agent_summary:agent-synthesis",
-    summary: "Cost agent repeated supplier A's lead-time assumption.",
-    note: "An agent-derived echo reused the same upstream assumption.",
-  }, "cost-agent"),
+  createEvent(
+    runId,
+    4,
+    "evidence.recorded",
+    "2026-08-27T10:30:05Z",
+    {
+      phase: "evidence",
+      cycle: 1,
+      evidence_id: "evidence.supplier_a.echo",
+      claim_ids: ["claim.supplier_a.lead_time"],
+      origin: "agent_derived",
+      source_group: "agent_summary:agent-synthesis",
+      summary: "Cost agent repeated supplier A's lead-time assumption.",
+      note: "An agent-derived echo reused the same upstream assumption.",
+    },
+    "cost-agent",
+  ),
   createEvent(runId, 5, "proposal.created", "2026-08-27T10:30:07Z", {
     phase: "parliament",
     cycle: 1,
@@ -333,25 +577,39 @@ const events: SseEnvelope[] = [
     repeated_evidence_ids: ["evidence.supplier_a.stale_offer", "evidence.supplier_a.echo"],
     summary: "Five of six roles initially converge on Supplier A.",
   }),
-  createEvent(runId, 6, "task.started", "2026-08-27T10:30:09Z", {
-    phase: "jury",
-    cycle: 1,
-    task: "clean_room_dissent",
-    context_id: "clean-room-1",
-    memory_namespace: "dissent.false-consensus.cycle-1",
-    tool_cache_namespace: "dissent-cache.false-consensus.cycle-1",
-    note: "Dissent isolates itself from Parliament memory before re-checking lead time.",
-  }, "dissent"),
-  createEvent(runId, 7, "evidence.recorded", "2026-08-27T10:30:11Z", {
-    phase: "jury",
-    cycle: 1,
-    evidence_id: "evidence.dissent.initial",
-    claim_ids: ["claim.supplier_a.lead_time.live"],
-    origin: "external",
-    source_group: "partner_audit:supplier-a-live-audit",
-    summary: "Fresh Dissent retrieval shows supplier A is actually slow.",
-    note: "Clean-room audit retrieved an independent contradiction.",
-  }, "dissent"),
+  createEvent(
+    runId,
+    6,
+    "task.started",
+    "2026-08-27T10:30:09Z",
+    {
+      phase: "jury",
+      cycle: 1,
+      task: "clean_room_dissent",
+      context_id: "clean-room-1",
+      memory_namespace: "dissent.false-consensus.cycle-1",
+      tool_cache_namespace: "dissent-cache.false-consensus.cycle-1",
+      note: "Dissent isolates itself from Parliament memory before re-checking lead time.",
+    },
+    "dissent",
+  ),
+  createEvent(
+    runId,
+    7,
+    "evidence.recorded",
+    "2026-08-27T10:30:11Z",
+    {
+      phase: "jury",
+      cycle: 1,
+      evidence_id: "evidence.dissent.initial",
+      claim_ids: ["claim.supplier_a.lead_time.live"],
+      origin: "external",
+      source_group: "partner_audit:supplier-a-live-audit",
+      summary: "Fresh Dissent retrieval shows supplier A is actually slow.",
+      note: "Clean-room audit retrieved an independent contradiction.",
+    },
+    "dissent",
+  ),
   createEvent(runId, 8, "jury.evaluated", "2026-08-27T10:30:14Z", {
     phase: "jury",
     cycle: 1,
@@ -393,13 +651,20 @@ const events: SseEnvelope[] = [
     summary: "An independent audit confirms Supplier B can still arrive in 1 day.",
     note: "Investigation added an independent public audit for supplier B lead time.",
   }),
-  createEvent(runId, 12, "task.completed", "2026-08-27T10:30:24Z", {
-    phase: "jury",
-    cycle: 2,
-    task: "clean_room_dissent",
-    checked_claims: ["claim.supplier_b.lead_time.live"],
-    note: "Dissent completed its fresh verification for Supplier B.",
-  }, "dissent"),
+  createEvent(
+    runId,
+    12,
+    "task.completed",
+    "2026-08-27T10:30:24Z",
+    {
+      phase: "jury",
+      cycle: 2,
+      task: "clean_room_dissent",
+      checked_claims: ["claim.supplier_b.lead_time.live"],
+      note: "Dissent completed its fresh verification for Supplier B.",
+    },
+    "dissent",
+  ),
   createEvent(runId, 13, "jury.evaluated", "2026-08-27T10:30:27Z", {
     phase: "jury",
     cycle: 2,
@@ -441,7 +706,8 @@ export const scenarioRecord: ScenarioRecord = {
   run_id: runId,
   procurement_goal: {
     title: "Autonomous food procurement",
-    thesis: "Make Parliament visible, then make the Jury prove whether that agreement deserves to execute.",
+    thesis:
+      "Make Parliament visible, then make the Jury prove whether that agreement deserves to execute.",
     demandWindow: "7-day horizon, with a day-one shortage of 4 units at warehouse north.",
     warehouses: ["Warehouse North"],
     suppliers: ["Supplier A", "Supplier B"],
@@ -464,7 +730,11 @@ export class MockEventSource {
   #listeners = new Map<WorkflowEventType, Set<TypedListener>>();
   #timers: number[] = [];
 
-  constructor(url: string, private readonly frames: SseEnvelope[], private readonly paceMs = 850) {
+  constructor(
+    url: string,
+    private readonly frames: SseEnvelope[],
+    private readonly paceMs = 850,
+  ) {
     this.url = url;
   }
 

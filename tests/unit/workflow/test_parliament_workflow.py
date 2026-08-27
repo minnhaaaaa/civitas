@@ -62,7 +62,7 @@ class FakeJury:
 
 def _request(*, planning_run_id: str = "run-1", repeated: bool = False) -> OptimizationRequest:
     annotations: dict[str, Any] = {
-        "plan-a": {"claim_ids": ["claim-a"], "evidence_ids": ["e1" if repeated else "e1"]},
+        "plan-a": {"claim_ids": ["claim-a"], "evidence_ids": ["e1"]},
         "plan-b": {"claim_ids": ["claim-b"], "evidence_ids": ["e1" if repeated else "e2"]},
     }
     return OptimizationRequest(
@@ -263,10 +263,11 @@ async def test_every_transition_emits_a_typed_event() -> None:
         limits=WorkflowLimits(max_cycles=3, deadline_at=now + timedelta(hours=1)),
     )
 
-    assert [event["sequence"] for event in result.events] == list(
-        range(1, len(result.events) + 1)
+    assert [event["sequence"] for event in result.events] == list(range(1, len(result.events) + 1))
+    assert all(
+        isinstance(event["payload"], dict) and "phase" in event["payload"]
+        for event in result.events
     )
-    assert all(isinstance(event["payload"], dict) and "phase" in event["payload"] for event in result.events)
     assert workflow.compile_langgraph() is not None
 
 
@@ -286,4 +287,6 @@ async def test_agents_never_authorize_quantities_directly() -> None:
 
     assert checkpoint.parliament is not None
     assert checkpoint.parliament.proposals
-    assert all("quantity" not in proposal.model_dump() for proposal in checkpoint.parliament.proposals)
+    assert all(
+        "quantity" not in proposal.model_dump() for proposal in checkpoint.parliament.proposals
+    )

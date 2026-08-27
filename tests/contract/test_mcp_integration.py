@@ -91,6 +91,15 @@ async def test_repeated_write_idempotency_returns_original_result() -> None:
     assert first.observed_at == second.observed_at
 
 
+@pytest.mark.asyncio
+async def test_write_requires_non_empty_idempotency_key() -> None:
+    server = MockProcurementMCPServer()
+    client = MCPClient(transport=server, policy=DEFAULT_PROCUREMENT_POLICY)
+
+    with pytest.raises(MCPAccessError, match="non-empty idempotency key"):
+        await client.invoke(_write_call("create_procurement_order", idempotency_key=""))
+
+
 def test_clean_room_namespaces_are_distinct_and_predictable() -> None:
     namespace = clean_room_namespace("Dissent Run 4")
 

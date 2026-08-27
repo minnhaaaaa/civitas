@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from civitas.api.app import DemoIntegrationService, create_app
 
@@ -35,3 +38,31 @@ async def test_demo_service_runs_full_false_consensus_flow() -> None:
         if event.event_type.value == "task.started"
     )
     assert any(event.payload.get("state") == "duplicate" for event in snapshot.events)
+
+
+@pytest.mark.asyncio
+async def test_demo_http_api_runs_in_background_and_replays_sse() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/api/demo-runs",
+            json={"scenario_id": "false-consensus-demo"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["status"] == "running"
+
+        snapshot = None
+        for _ in range(100):
+            response = await client.get(f"/api/demo-runs/{payload['run_id']}")
+            snapshot = response.json()
+            if snapshot["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+
+        assert snapshot is not None
+        assert snapshot["final_state"] == "approve"
+        stream = await client.get(payload["stream_url"])
+        assert stream.status_code == 200
+        assert "event: jury.evaluated" in stream.text
+        assert "event: execution.updated" in stream.text

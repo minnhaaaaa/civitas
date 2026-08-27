@@ -6,7 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 from hypothesis import strategies as st
 
-from civitas.optimization import Demand, InventoryLot, OptimizationProblem, PlanningBucket, SupplierOffer
+from civitas.optimization import (
+    Demand,
+    InventoryLot,
+    OptimizationProblem,
+    PlanningBucket,
+    SupplierOffer,
+)
 
 
 @st.composite
@@ -14,7 +20,9 @@ def small_problem_strategy(draw: st.DrawFn) -> OptimizationProblem:
     """Generate one-bucket problems that stay within exhaustive-oracle limits."""
 
     start = datetime(2026, 8, 27, tzinfo=UTC)
-    bucket = PlanningBucket("day-1", start, start + timedelta(days=1), urgency=draw(st.integers(1, 3)))
+    bucket = PlanningBucket(
+        "day-1", start, start + timedelta(days=1), urgency=draw(st.integers(1, 3))
+    )
     demand_quantity = draw(st.integers(min_value=0, max_value=8))
     inventory_quantity = draw(st.integers(min_value=0, max_value=6))
     offer_count = draw(st.integers(min_value=0, max_value=3))

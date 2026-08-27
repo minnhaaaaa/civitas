@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -23,6 +24,7 @@ from civitas.contracts import (
     WorkflowEvent,
     WorkflowEventType,
 )
+from civitas.contracts.common import Contract
 from civitas.contracts.enums import JuryState
 from civitas.contracts.execution import ExecutionResult
 from civitas.contracts.jury import JuryEvaluation, JuryRequest
@@ -56,13 +58,13 @@ class SystemClock(Clock):
         return datetime.now(UTC)
 
 
-class SequenceIDs(IDGenerator):
-    def __init__(self) -> None:
-        self._counter = 0
-
+class UUIDIDs(IDGenerator):
     def new_id(self, namespace: str) -> str:
-        self._counter += 1
-        return f"{namespace}-{self._counter}"
+        return f"{namespace}-{uuid4()}"
+
+
+class CreateDemoRunRequest(Contract):
+    scenario_id: str = "false-consensus-demo"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +89,9 @@ class DemoRunRecord:
 
     async def publish(self, event: WorkflowEvent) -> None:
         self.events.append(event)
-        self.current_cycle = int(event.payload.get("cycle", self.current_cycle))
+        cycle = event.payload.get("cycle")
+        if isinstance(cycle, int) and not isinstance(cycle, bool):
+            self.current_cycle = cycle
         for queue in list(self._subscriber_queues):
             await queue.put(event)
 
@@ -98,12 +102,14 @@ class DemoRunRecord:
 
     async def stream(self) -> AsyncIterator[WorkflowEvent]:
         queue: asyncio.Queue[WorkflowEvent | None] = asyncio.Queue()
-        for event in self.events:
-            await queue.put(event)
-        if self._done.is_set():
-            await queue.put(None)
         self._subscriber_queues.append(queue)
+        replay = tuple(self.events)
+        already_done = self._done.is_set()
         try:
+            for event in replay:
+                yield event
+            if already_done:
+                return
             while True:
                 item = await queue.get()
                 if item is None:
@@ -845,10 +851,13 @@ class FalseConsensusScenarioState:
 
 
 class DemoIntegrationService:
+    MAX_RETAINED_RUNS = 100
+
     def __init__(self) -> None:
         self._clock = SystemClock()
-        self._ids = SequenceIDs()
+        self._ids = UUIDIDs()
         self._runs: dict[str, DemoRunRecord] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
         self._scenarios = (
             DemoScenarioSummary(
                 scenario_id="false-consensus-demo",
@@ -869,9 +878,24 @@ class DemoIntegrationService:
         return self._runs.get(run_id)
 
     async def create_run(self, scenario_id: str) -> DemoRunRecord:
+        run = self._create_run_record(scenario_id)
+        await self._execute_run(run)
+        return run
+
+    def start_run(self, scenario_id: str) -> DemoRunRecord:
+        run = self._create_run_record(scenario_id)
+        task = asyncio.create_task(self._execute_run(run))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return run
+
+    def _create_run_record(self, scenario_id: str) -> DemoRunRecord:
         scenario = next((item for item in self._scenarios if item.scenario_id == scenario_id), None)
         if scenario is None:
             raise KeyError(scenario_id)
+        self._prune_completed_runs()
+        if len(self._runs) >= self.MAX_RETAINED_RUNS:
+            raise RuntimeError("Too many demo runs are currently active; retry later.")
         run_id = self._ids.new_id("planning-run")
         run = DemoRunRecord(
             run_id=run_id,
@@ -881,8 +905,16 @@ class DemoIntegrationService:
             status="running",
         )
         self._runs[run_id] = run
-        await self._execute_run(run)
         return run
+
+    def _prune_completed_runs(self) -> None:
+        completed = sorted(
+            (run for run in self._runs.values() if run._done.is_set()),
+            key=lambda run: run.started_at,
+        )
+        while completed and len(self._runs) >= self.MAX_RETAINED_RUNS:
+            expired = completed.pop(0)
+            self._runs.pop(expired.run_id, None)
 
     async def _execute_run(self, run: DemoRunRecord) -> None:
         emitter = RunEmitter(run, self._ids, self._clock)
@@ -923,6 +955,8 @@ class DemoIntegrationService:
             run.final_state = checkpoint.final_state
             if checkpoint.final_state != JuryState.APPROVE.value:
                 return
+            if checkpoint.optimization_result is None or checkpoint.parliament is None:
+                raise RuntimeError("approved workflow is missing its selected solver result")
 
             selected_plan = next(
                 plan
@@ -1005,14 +1039,15 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/demo-runs")
-    async def create_demo_run(payload: dict[str, object] | None = None) -> dict[str, object]:
-        selected = "false-consensus-demo"
-        if payload and isinstance(payload.get("scenario_id"), str):
-            selected = str(payload["scenario_id"])
+    async def create_demo_run(payload: CreateDemoRunRequest) -> dict[str, object]:
         try:
-            run = await service.create_run(selected)
+            run = service.start_run(payload.scenario_id)
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"Unknown scenario {selected!r}.") from exc
+            raise HTTPException(
+                status_code=404, detail=f"Unknown scenario {payload.scenario_id!r}."
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         return {
             "run_id": run.run_id,
             "scenario_id": run.scenario_id,

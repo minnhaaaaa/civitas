@@ -5,12 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from civitas.contracts.common import JsonObject
 from civitas.contracts.enums import ExecutionState
 from civitas.contracts.execution import ExecutionRequest, ExecutionResult
 from civitas.contracts.optimization import CandidatePlan
-from civitas.contracts.tools import MCPAccessMode, MCPToolCall
+from civitas.contracts.tools import MCPAccessMode, MCPToolCall, MCPToolResult
 from civitas.ports.clock import Clock
-from civitas.ports.execution import ExecutionPort
 from civitas.ports.ids import IDGenerator
 from civitas.ports.mcp import MCPPort
 
@@ -27,7 +27,7 @@ class RevalidationSnapshot:
     warehouse_capacity_units: Mapping[str, int]
 
 
-class GuardedExecutionService(ExecutionPort):
+class GuardedExecutionService:
     """Revalidates mutable inputs immediately before guarded MCP writes."""
 
     def __init__(
@@ -100,28 +100,28 @@ class GuardedExecutionService(ExecutionPort):
         lead_times = await self._invoke_read(planning_run_id, "get_lead_times", {})
         capacities = await self._invoke_read(planning_run_id, "get_warehouse_capacity", {})
         _ = approved_plan
+        inventory_records = _records(inventory.payload, "lots")
+        offer_records = _records(offers.payload, "offers")
+        lead_time_records = _records(lead_times.payload, "records")
+        capacity_records = _records(capacities.payload, "records")
         return RevalidationSnapshot(
             inventory_lot_ids=frozenset(
-                str(item["lot_id"])
-                for item in inventory.payload.get("lots", [])
-                if isinstance(item, dict) and "lot_id" in item
+                str(item["lot_id"]) for item in inventory_records if "lot_id" in item
             ),
             offer_ids=frozenset(
-                str(item["offer_id"])
-                for item in offers.payload.get("offers", [])
-                if isinstance(item, dict) and "offer_id" in item
+                str(item["offer_id"]) for item in offer_records if "offer_id" in item
             ),
             lead_time_days={
-                str(item["supplier_id"]): int(item["lead_time_days"])
-                for item in lead_times.payload.get("records", [])
-                if isinstance(item, dict) and "supplier_id" in item and "lead_time_days" in item
+                str(item["supplier_id"]): _required_int(item["lead_time_days"], "lead_time_days")
+                for item in lead_time_records
+                if "supplier_id" in item and "lead_time_days" in item
             },
             warehouse_capacity_units={
-                str(item["warehouse_id"]): int(item["remaining_capacity_units"])
-                for item in capacities.payload.get("records", [])
-                if isinstance(item, dict)
-                and "warehouse_id" in item
-                and "remaining_capacity_units" in item
+                str(item["warehouse_id"]): _required_int(
+                    item["remaining_capacity_units"], "remaining_capacity_units"
+                )
+                for item in capacity_records
+                if "warehouse_id" in item and "remaining_capacity_units" in item
             },
         )
 
@@ -130,7 +130,7 @@ class GuardedExecutionService(ExecutionPort):
         planning_run_id: str,
         tool_name: str,
         arguments: Mapping[str, object],
-    ):
+    ) -> MCPToolResult:
         return await self._mcp.invoke(
             MCPToolCall(
                 call_id=self._ids.new_id("mcp-read"),
@@ -208,3 +208,19 @@ class GuardedExecutionService(ExecutionPort):
         if isinstance(order_id, str):
             return (order_id,)
         return ()
+
+
+def _records(payload: JsonObject, key: str) -> tuple[JsonObject, ...]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))
+
+
+def _required_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise FreshnessRevalidationError(f"MCP returned malformed {field}.")
+    try:
+        return int(value)
+    except ValueError as error:
+        raise FreshnessRevalidationError(f"MCP returned malformed {field}.") from error

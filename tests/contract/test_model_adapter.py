@@ -21,8 +21,9 @@ class _FakeHTTPResponse:
         self._payload = payload
         self.headers = cast(object, {})
 
-    def read(self) -> bytes:
-        return json.dumps(self._payload).encode("utf-8")
+    def read(self, amount: int | None = None) -> bytes:
+        payload = json.dumps(self._payload).encode("utf-8")
+        return payload if amount is None else payload[:amount]
 
 
 def _request() -> ModelRequest:
@@ -98,6 +99,27 @@ async def test_groq_adapter_rejects_non_json_message_content() -> None:
 
 
 @pytest.mark.asyncio
+async def test_groq_adapter_rejects_non_finite_json_numbers() -> None:
+    def opener(_request_obj: request.Request, *, timeout: float) -> _FakeHTTPResponse:
+        return _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"supplier_id":"S1","quantity":NaN}'},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    adapter = GroqModelAdapter(api_key="key", model_identifier="groq-test", opener=opener)
+
+    with pytest.raises(ModelOutputValidationError, match="valid JSON"):
+        await adapter.complete(_request())
+
+
+@pytest.mark.asyncio
 async def test_groq_adapter_requires_usage_metadata() -> None:
     def opener(_request_obj: request.Request, *, timeout: float) -> _FakeHTTPResponse:
         return _FakeHTTPResponse(
@@ -115,3 +137,31 @@ async def test_groq_adapter_requires_usage_metadata() -> None:
 
     with pytest.raises(ModelResponseFormatError, match="usage metadata"):
         await adapter.complete(_request())
+
+
+@pytest.mark.asyncio
+async def test_model_adapter_enforces_schema_bounds_and_patterns() -> None:
+    constrained = _request().model_copy(
+        update={
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "supplier_id": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 4,
+                        "pattern": r"^S[0-9]+$",
+                    },
+                    "quantity": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+                "required": ["supplier_id", "quantity"],
+                "additionalProperties": False,
+            }
+        }
+    )
+    adapter = FakeModelAdapter(
+        {"op-1": FakeModelPlan(structured_output={"supplier_id": "ignore", "quantity": 0})}
+    )
+
+    with pytest.raises(ModelOutputValidationError):
+        await adapter.complete(constrained)

@@ -1,7 +1,11 @@
+from evaluation import small_problem_strategy
 from hypothesis import given, settings
 
-from civitas.optimization import ConstraintVerifier, OptimizationEngine, exhaustive_single_bucket_optimum
-from evaluation import small_problem_strategy
+from civitas.optimization import (
+    ConstraintVerifier,
+    OptimizationEngine,
+    exhaustive_single_bucket_optimum,
+)
 
 
 @given(problem=small_problem_strategy())

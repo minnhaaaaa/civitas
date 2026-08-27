@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from tools.mock_mcp import MockProcurementMCPServer
 
 from civitas.contracts.claims import ClaimScope, TypedClaim
 from civitas.contracts.enums import EvidenceOrigin, FeasibilityStatus
@@ -22,7 +24,6 @@ from civitas.persistence.models import (
     SupplierModel,
     WarehouseModel,
 )
-from tools.mock_mcp import MockProcurementMCPServer
 
 
 class FakeClock:
@@ -54,7 +55,9 @@ def identifier(prefix: str) -> str:
     return f"{prefix}-{uuid4()}"
 
 
-def execution_request(*, planning_run_id: str, plan_id: str, jury_id: str, key: str) -> ExecutionRequest:
+def execution_request(
+    *, planning_run_id: str, plan_id: str, jury_id: str, key: str
+) -> ExecutionRequest:
     return ExecutionRequest(
         execution_id=identifier("exec"),
         planning_run_id=planning_run_id,
@@ -201,9 +204,30 @@ async def seed_execution_state(
                 policy_version="decision-integrity-v1",
                 implementation_version="impl-1",
                 calculated_at=datetime(2026, 8, 27, 11, 55, tzinfo=UTC),
-                component_scores={},
+                component_scores={
+                    "critical_claim_coverage": 100,
+                    "evidence_independence": 100,
+                    "provenance_completeness": 100,
+                    "evidence_freshness": 100,
+                    "canonical_source_diversity": 100,
+                    "contradiction_resolution": 100,
+                    "dissent_robustness": 100,
+                },
                 integrity_score=Decimal("99"),
-                gate_results=[],
+                gate_results=[
+                    {"gate_code": gate_code, "passed": True, "reason_codes": []}
+                    for gate_code in (
+                        "solver_feasibility",
+                        "hard_constraints",
+                        "critical_contradictions",
+                        "critical_external_support",
+                        "execution_freshness",
+                        "autonomy_bounds",
+                        "human_approval",
+                        "proposal_validity",
+                        "dissent_completion",
+                    )
+                ],
                 final_state="approve",
                 reason_codes=[],
                 per_claim_contributions={},
@@ -237,7 +261,11 @@ async def test_stale_inputs_block_execution(database: Database) -> None:
                     warehouse_id=warehouse_id,
                 ),
             ),
-            evidence=(evidence(evidence_id="e-1", claim_id="claim-1", observed_at=now - timedelta(minutes=15)),),
+            evidence=(
+                evidence(
+                    evidence_id="e-1", claim_id="claim-1", observed_at=now - timedelta(minutes=15)
+                ),
+            ),
             observed_unit_prices={offer_key: Decimal("5")},
             constraints={f"offer:{offer_key}:available": Decimal("10")},
         )
@@ -405,15 +433,138 @@ async def test_duplicate_requests_do_not_duplicate_orders(database: Database) ->
     )
     key = identifier("idem")
 
-    first = await service.execute(
-        execution_request(planning_run_id=planning_run_id, plan_id=plan_id, jury_id=jury_id, key=key)
-    )
-    second = await service.execute(
-        execution_request(planning_run_id=planning_run_id, plan_id=plan_id, jury_id=jury_id, key=key)
+    first, second = await asyncio.gather(
+        service.execute(
+            execution_request(
+                planning_run_id=planning_run_id,
+                plan_id=plan_id,
+                jury_id=jury_id,
+                key=key,
+            )
+        ),
+        service.execute(
+            execution_request(
+                planning_run_id=planning_run_id,
+                plan_id=plan_id,
+                jury_id=jury_id,
+                key=key,
+            )
+        ),
     )
 
-    assert first.decision == "execute"
-    assert first.result.state == "succeeded"
-    assert second.decision == "duplicate"
-    assert second.result.state == "duplicate"
-    assert second.result.external_references == first.result.external_references
+    outcomes = {first.decision: first, second.decision: second}
+    assert set(outcomes) == {"execute", "duplicate"}
+    assert outcomes["execute"].result.state == "succeeded"
+    assert outcomes["duplicate"].result.state == "duplicate"
+    assert (
+        outcomes["duplicate"].result.external_references
+        == outcomes["execute"].result.external_references
+    )
+    assert len(server._write_results) == 1
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_plan_and_jury_cannot_be_mixed_across_runs(database: Database) -> None:
+    first = await seed_execution_state(database)
+    second = await seed_execution_state(database)
+    server = MockProcurementMCPServer()
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=server,
+        ids=FakeIDs(),
+        clock=FakeClock(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)),
+        refresher=StaticRefresher(
+            RefreshBundle(claims=(), evidence=(), observed_unit_prices={}, constraints={})
+        ),
+    )
+
+    with pytest.raises(ValueError, match="does not belong to the planning run"):
+        await service.execute(
+            execution_request(
+                planning_run_id=first[0],
+                plan_id=second[1],
+                jury_id=second[2],
+                key=identifier("idem"),
+            )
+        )
+
+    assert server._write_results == {}
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_failed_hard_gate_cannot_reach_execution(database: Database) -> None:
+    state = await seed_execution_state(database)
+    async with database.unit_of_work() as uow:
+        jury = await uow.require_session().get(JuryDecisionModel, state[2])
+        assert jury is not None
+        jury.gate_results = [
+            {**gate, "passed": False} if gate["gate_code"] == "dissent_completion" else gate
+            for gate in jury.gate_results
+        ]
+
+    server = MockProcurementMCPServer()
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=server,
+        ids=FakeIDs(),
+        clock=FakeClock(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)),
+        refresher=StaticRefresher(
+            RefreshBundle(claims=(), evidence=(), observed_unit_prices={}, constraints={})
+        ),
+    )
+
+    with pytest.raises(ValueError, match="failed hard gates"):
+        await service.execute(
+            execution_request(
+                planning_run_id=state[0],
+                plan_id=state[1],
+                jury_id=state[2],
+                key=identifier("idem"),
+            )
+        )
+
+    assert server._write_results == {}
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_idempotency_key_cannot_be_reused_for_different_action(database: Database) -> None:
+    state = await seed_execution_state(database)
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    offer_key = f"{state[6]}:{state[4]}:{state[5]}"
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=MockProcurementMCPServer(),
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        refresher=StaticRefresher(
+            RefreshBundle(
+                claims=(
+                    claim(
+                        claim_id="claim-idempotency",
+                        predicate="unit_price",
+                        observed_at=now,
+                        organization_id=state[3],
+                        sku_id=state[4],
+                        warehouse_id=state[5],
+                    ),
+                ),
+                evidence=(
+                    evidence(
+                        evidence_id="e-idempotency",
+                        claim_id="claim-idempotency",
+                        observed_at=now,
+                    ),
+                ),
+                observed_unit_prices={offer_key: Decimal("5")},
+                constraints={f"offer:{offer_key}:available": Decimal("10")},
+            )
+        ),
+    )
+    key = identifier("idem")
+    original = execution_request(
+        planning_run_id=state[0], plan_id=state[1], jury_id=state[2], key=key
+    )
+    await service.execute(original)
+
+    with pytest.raises(ValueError, match="different execution request"):
+        await service.execute(original.model_copy(update={"action": {"source": "tampered"}}))
