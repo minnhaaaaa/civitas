@@ -41,6 +41,78 @@ Keep the public tool catalog small and intent-level:
 
 Investigation and replanning remain internal workflow transitions. A diagnostic deployment may expose read-only evidence resources, but the normal agent should not orchestrate low-level Parliament or repository operations itself.
 
+## Versioned wire contracts
+
+All public tool requests and responses use MCP product contract version `1`. The
+canonical Python definitions are `civitas.contracts.mcp_product`; MCP and HTTP
+adapters must generate their schemas from those definitions rather than create
+parallel DTOs. Unknown fields are rejected at every public boundary.
+
+| Tool | Request contract | Response contract |
+| --- | --- | --- |
+| `plan_procurement_goal` | `PlanProcurementGoalRequest` | `PlanningRunResponse` |
+| `get_planning_run` | `GetPlanningRunRequest` | `PlanningRunResponse` |
+| `get_decision_summary` | `GetDecisionSummaryRequest` | `DecisionSummary` |
+| `prepare_execution` | `PrepareExecutionRequest` | `PrepareExecutionResponse` |
+| `approve_execution` | `ApproveExecutionRequest` | `ApproveExecutionResponse` |
+| `execute_approved_plan` | `ExecuteApprovedPlanRequest` | `ExecuteApprovedPlanResponse` |
+| `get_execution_audit` | `GetExecutionAuditRequest` | `ExecutionAuditResponse` |
+
+`plan_procurement_goal` requires a bounded `ProcurementGoal`: explicit
+timezone-aware horizon start and end timestamps (at most 31 days), one or more
+SKU and warehouse identifiers, maximum cycles, model and tool-call budgets,
+and a deadline. An unbounded natural-language goal is invalid input.
+
+Every planning and decision response carries the organization-scoped run ID,
+current status, policy version, and timestamps needed by the next call. A
+decision summary includes the selected immutable plan hash when a plan exists,
+deterministic business impact, Integrity state, hard-gate outcome, material
+uncertainties, and only an optional audit-view link.
+
+### Cursor and payload limits
+
+Progress and execution-audit reads use an opaque URL-safe base64 JSON cursor
+with the canonical decoded shape `{"v": 1, "after": <non-negative integer>}`.
+Malformed or unsupported cursors are `invalid_input`; clients must treat them
+as opaque. Page size defaults to 20 and is limited to 50 records. Tool payloads
+are concise summaries: large evidence graphs remain paginated resources or the
+optional audit viewer, never unbounded tool responses.
+
+### Approval contract
+
+Approval contract version `1` binds the following values into a short-lived
+challenge and then the resulting approval receipt:
+
+```text
+organization ID + authenticated operator ID + planning run ID
++ selected immutable plan hash + policy version + approved totals
++ issued time + expiry
+```
+
+`prepare_execution` returns an approval challenge, including its one-time
+secret. The persistence implementation stores only a hash of that secret.
+`approve_execution` requires both challenge ID and secret; it returns the
+receipt used by `execute_approved_plan`. The execute request additionally
+requires an idempotency key. Any changed plan hash, expired or consumed
+challenge, stale refresh, failed Jury gate, or material revalidation change
+prevents execution.
+
+### Stable error codes
+
+Adapters map typed application errors to these non-sensitive codes without
+returning stack traces, SQL errors, credentials, or cross-organization IDs:
+
+```text
+invalid_input | not_found | conflict | expired_approval | stale_data
+investigation_required | escalation_required | rejected_execution
+duplicate_execution
+```
+
+The application service receives an authenticated `OperatorContext` containing
+organization ID, operator ID, authentication subject, authentication time,
+roles, and correlation ID. This context is derived by the transport and is not
+accepted from a tool payload.
+
 ## Conversational contract
 
 Codex may summarize and explain results, but structured MCP responses remain authoritative. Every response includes `organization_id`, `run_id`, `status`, policy version, timestamps, and stable identifiers required for the next operation.
