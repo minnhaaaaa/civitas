@@ -1,1 +1,51 @@
 """External model and MCP adapters."""
+
+from civitas.integrations.mcp import (
+    DEFAULT_PROCUREMENT_POLICY,
+    CleanRoomNamespace,
+    DissentMCPClient,
+    FakeMCPAdapter,
+    MCPAccessError,
+    MCPCapabilityPolicy,
+    MCPClient,
+    MCPIntegrationError,
+    MCPInvocationError,
+    ToolEvidenceMapping,
+    clean_room_namespace,
+    evidence_from_tool_result,
+)
+from civitas.integrations.model import (
+    FakeModelAdapter,
+    FakeModelPlan,
+    GroqModelAdapter,
+    ModelAdapterError,
+    ModelOutputValidationError,
+    ModelResponseFormatError,
+    ModelTimeoutError,
+    ModelTransportError,
+    RetryPolicy,
+)
+
+__all__ = [
+    "DEFAULT_PROCUREMENT_POLICY",
+    "CleanRoomNamespace",
+    "DissentMCPClient",
+    "FakeMCPAdapter",
+    "FakeModelAdapter",
+    "FakeModelPlan",
+    "GroqModelAdapter",
+    "MCPAccessError",
+    "MCPCapabilityPolicy",
+    "MCPClient",
+    "MCPIntegrationError",
+    "MCPInvocationError",
+    "ModelAdapterError",
+    "ModelOutputValidationError",
+    "ModelResponseFormatError",
+    "ModelTimeoutError",
+    "ModelTransportError",
+    "RetryPolicy",
+    "ToolEvidenceMapping",
+    "clean_room_namespace",
+    "evidence_from_tool_result",
+]
