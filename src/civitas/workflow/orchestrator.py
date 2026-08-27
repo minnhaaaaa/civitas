@@ -108,21 +108,34 @@ class ParliamentWorkflow:
     ) -> tuple[WorkflowCheckpoint, tuple[WorkflowEvent, ...]]:
         if checkpoint.completed:
             return checkpoint, ()
+        startup_events: tuple[WorkflowEvent, ...] = ()
+        if checkpoint.event_sequence == 0:
+            checkpoint, started = self._record(
+                checkpoint,
+                WorkflowEventType.RUN_STARTED,
+                RunStartedPayload(phase=checkpoint.phase, cycle=checkpoint.cycle),
+            )
+            startup_events = (started,)
         if self._bounds_exhausted(checkpoint, limits):
             checkpoint, event = self._terminate(
                 checkpoint, WorkflowPhase.ESCALATE, "bounds_exhausted"
             )
-            return checkpoint, (event,)
+            return checkpoint, (*startup_events, event)
         if checkpoint.phase == WorkflowPhase.PROPOSAL:
-            return await self._proposal_round(checkpoint)
+            updated, events = await self._proposal_round(checkpoint)
+            return updated, (*startup_events, *events)
         if checkpoint.phase == WorkflowPhase.CHALLENGE:
-            return await self._challenge_round(checkpoint)
+            updated, events = await self._challenge_round(checkpoint)
+            return updated, (*startup_events, *events)
         if checkpoint.phase == WorkflowPhase.CONCESSION:
-            return await self._concession_round(checkpoint)
+            updated, events = await self._concession_round(checkpoint)
+            return updated, (*startup_events, *events)
         if checkpoint.phase == WorkflowPhase.JURY:
-            return await self._jury_round(checkpoint, limits=limits)
+            updated, events = await self._jury_round(checkpoint, limits=limits)
+            return updated, (*startup_events, *events)
         if checkpoint.phase == WorkflowPhase.INVESTIGATION:
-            return self._investigate(checkpoint, limits=limits)
+            updated, events = self._investigate(checkpoint, limits=limits)
+            return updated, (*startup_events, *events)
         raise ValueError(f"unsupported phase {checkpoint.phase}")
 
     def compile_langgraph(self) -> object:
