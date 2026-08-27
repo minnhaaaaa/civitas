@@ -1,6 +1,14 @@
 # Security and integration status
 
-This repository separates the public local demonstration from the guarded, persistence-backed execution boundary.
+This repository separates the public local demonstration from the guarded, persistence-backed execution boundary. The approved product direction adds an inbound Civitas MCP server for Codex while retaining outbound MCP clients for procurement providers. These are separate trust boundaries.
+
+## Inbound agent boundary
+
+Codex is a presentation and intent-capture layer, not an execution authority. The inbound MCP server may expose only bounded application workflows and read-only status/audit retrieval plus the guarded approval sequence. It must not expose generic repositories, arbitrary query execution, provider credentials, unrestricted operational tools, or direct inventory and order mutations.
+
+Every call must derive organization and operator identity from authenticated deployment context rather than model-supplied identifiers. Structured arguments remain untrusted input and receive the same strict validation, ownership checks, limits, and audit treatment as guarded HTTP requests. Remote multi-tenant MCP deployments require OAuth; controlled single-tenant deployments may use rotated bearer credentials over TLS.
+
+The Codex-facing server and procurement-provider clients must not share credentials. Dissent keeps read-only outbound credentials and isolated cache namespaces. Execution obtains only the minimum outbound write capability required for the approved action.
 
 ## Local demonstration
 
@@ -23,6 +31,8 @@ Before an MCP write, execution verifies that the run is approved, the selected s
 
 Idempotency is scoped by organization and serialized with a PostgreSQL transaction advisory lock. Every MCP write also requires a non-empty idempotency key. Mutable facts are refreshed, freshness TTLs are enforced, feasibility-sensitive capacities and prices are compared, inventory reservations use transactional FEFO allocation, and partial provider failures produce a compensation-required audit state.
 
+Conversational confirmation does not weaken these invariants. The inbound MCP flow must first issue a short-lived challenge bound to the immutable plan hash, organization, operator, approved totals, and policy version. A material refresh change invalidates the approval and returns the workflow to investigation or escalation.
+
 ## Injection review
 
 The audit found no raw SQL assembled from request, model, or MCP values. Persistence uses SQLAlchemy expressions and bound parameters. JSON fields are data, not executable SQL. Continue to prohibit `text()` or driver-level string interpolation with untrusted values.
@@ -30,6 +40,8 @@ The audit found no raw SQL assembled from request, model, or MCP values. Persist
 Model output is treated as untrusted: responses are capped at 1 MiB, parsed as JSON, required to have an object root, and checked for required fields, additional properties, enums, constants, combinators, lengths, patterns, array bounds, uniqueness, and numeric bounds. Models never cross the execution authorization boundary directly. Prompt text is not a security control; tool permissions, typed contracts, deterministic verification, Jury gates, and idempotent execution remain authoritative.
 
 ## Known integration limitations
+
+- The Codex-facing inbound MCP facade is an approved target interface but is not yet implemented. The current runnable product surface is the demonstration API and optional React viewer.
 
 - The generic Parliament workflow currently uses deterministic role implementations. The Groq adapter is contract-tested but is not yet composed into those roles for explanatory challenge text.
 - The generic investigation transition accepts a replanner callback; the demo performs real read-only MCP investigation around that transition. A production composition still needs a durable investigation worker.

@@ -5,7 +5,7 @@ Branch: `integration/end-to-end`
 
 ## Executive result
 
-The deterministic false-consensus demonstration works end to end with simulated providers. The repository is not yet a production deployment. The complete test suite, strict Python type checking, Python lint/format checks, frontend lint/type checking, production frontend build, Alembic upgrade, and dependency advisory scans pass.
+The deterministic false-consensus demonstration works end to end with simulated providers. The repository is not yet a production deployment. The approved product direction now makes a Codex-compatible inbound MCP server the primary interface and demotes the React application to an optional audit viewer; that inbound facade is documented but not implemented at this audit revision. The complete test suite, strict Python type checking, Python lint/format checks, frontend lint/type checking, production frontend build, Alembic upgrade, and dependency advisory scans pass.
 
 No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy expressions use bound parameters. No committed private key or provider credential was found. `pip-audit` and `pnpm audit --prod --audit-level high` reported no known vulnerable installed dependencies at audit time.
 
@@ -20,7 +20,7 @@ No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy 
 | 4 — Integrations | Complete for offline contracts | Provider-neutral Groq and MCP adapters, strict output validation, retries/timeouts, clean-room read-only policy, evidence conversion, fake adapters, and idempotent mock writes exist. |
 | 5 — Parliament/workflow | Partial production composition | Six deterministic roles, rounds, solver selection, Jury routing, bounds, events, and durable event snapshots exist. The generic workflow still needs a production investigation worker and optional model-backed explanation composition. |
 | 6 — Evaluation | Complete | Ten deterministic scenarios, hidden/visible separation, interventions, lineage expectations, independent verification, Hypothesis generation, metrics, and reports exist. |
-| 7 — Frontend | Complete for demo | Vite/React viewer, goal, Parliament story, alternatives, evidence graph, separate Integrity components and gates, replanning, execution status, typed SSE, and mock playback build successfully. |
+| 7 — Audit viewer | Complete for demo | The optional Vite/React viewer provides the goal, Parliament story, alternatives, evidence graph, separate Integrity components and gates, replanning, execution status, typed SSE, and mock playback. |
 | 8 — API/execution | Complete at tested boundary | Authenticated organization-scoped guarded routes, cursor/`Last-Event-ID`, freshness checks, plan/Jury binding, FEFO reservations, idempotency locking, MCP writes, and compensation states are integration-tested. Deployment composition is environment-specific. |
 | 9 — End-to-end | Complete for simulated demo | The UI and demo API exercise evidence retrieval → Parliament → solver alternatives → Jury/Dissent → replanning → approval → freshness checks → one idempotent mock MCP write. |
 
@@ -42,11 +42,13 @@ No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy 
 
 ## Remaining work before production
 
-1. Compose the guarded API factory, database, provider credentials, policy identity, and operator identity in a deployment entry point. The default app remains the offline demo.
-2. Implement the generic investigation step as a durable read-only MCP worker instead of relying on a callback or demo-specific orchestration.
-3. Decide whether Parliament explanations should use the model adapter. Solver ownership and deterministic scorecards must remain authoritative.
-4. Replace generic unscoped repository access with organization-required repository methods before exposing those repositories to additional APIs or workers.
-5. If LangGraph-native persistence is required, replace the topology-only compiled graph with a real checkpointer; current resume durability comes from PostgreSQL event snapshots.
-6. Add deployment controls: TLS termination, secret-manager integration, token rotation, operator roles, rate limiting, structured security logs, backups, and provider compensation implementations.
+1. Implement the intent-level inbound Civitas MCP facade described in `MCP_INTERFACE.md`, reusing guarded application services rather than creating a second execution path.
+2. Add local STDIO and deployed Streamable HTTP composition, with organization/operator authentication and short-lived plan-hash approval challenges.
+3. Compose the guarded API factory, database, provider credentials, policy identity, and operator identity in a deployment entry point. The default app remains the offline demo.
+4. Implement the generic investigation step as a durable read-only outbound MCP worker instead of relying on a callback or demo-specific orchestration.
+5. Decide whether Parliament explanations should use the model adapter. Solver ownership and deterministic scorecards must remain authoritative.
+6. Replace generic unscoped repository access with organization-required repository methods before exposing those repositories to additional APIs, MCP tools, or workers.
+7. If LangGraph-native persistence is required, replace the topology-only compiled graph with a real checkpointer; current resume durability comes from PostgreSQL event snapshots.
+8. Add deployment controls: TLS termination, OAuth or secret-manager integration, credential rotation, operator roles, rate limiting, structured security logs, backups, and provider compensation implementations.
 
 The branch history does not match the proposed one-branch-per-agent merge narrative. Git contains dedicated foundation and persistence commits, while optimization/evidence branch pointers remained at the foundation commit and the remaining features arrived together in `b262aed`. This is traceability debt, not a runtime defect; the audit assessed the integrated tree rather than inferring completion from branch names.

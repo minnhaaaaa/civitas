@@ -9,13 +9,14 @@
 | LLM Integration     | Provider-neutral adapter (Groq implementation) |
 | Structured Outputs  | Pydantic                 |
 | MCP                 | Python MCP SDK           |
+| Primary Interface   | Codex-compatible inbound MCP server |
 | Backend             | FastAPI                  |
 | Database            | PostgreSQL (system of record) |
 | Database Access     | SQLAlchemy 2.x async + psycopg 3 |
 | Migrations          | Alembic                  |
 | Evidence Graph      | PostgreSQL lineage + NetworkX projection |
 | Optimization        | Google OR-Tools          |
-| Frontend            | React + Vite             |
+| Audit Viewer        | React + Vite (optional, read-only) |
 | Frontend Language   | TypeScript               |
 | Styling             | Tailwind CSS             |
 | Graph Visualization | React Flow               |
@@ -26,6 +27,10 @@
 | Containerization    | Docker                   |
 
 ## Architectural Boundaries
+
+- Codex is the primary interaction layer. It calls a small, intent-level inbound Civitas MCP server; it does not receive repository primitives or direct operational write access.
+- Civitas also acts as an outbound MCP client to procurement systems. Inbound orchestration tools and outbound operational tools are separate trust boundaries with separate authentication and least-privilege policies.
+- The React application is an optional evidence and execution-audit projection. It is not required for normal procurement interaction and cannot bypass the guarded application service.
 
 - OR-Tools constructs and validates feasible procurement plans. LLM agents investigate, propose objectives and trade-offs, challenge evidence, and compare solver-generated alternatives; they do not directly authorize quantities for execution.
 - PostgreSQL is the durable source of truth for evidence, claims, lineage, workflow state, decisions, and execution audit records. NetworkX is a rebuildable in-memory projection used for graph analysis. React Flow is a read-only visualization projection.

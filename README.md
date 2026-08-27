@@ -1,10 +1,30 @@
 # Civitas
 
-Civitas is an autonomous multi-agent food-procurement system that combines negotiation, evidence-lineage analysis, adaptive replanning, deterministic optimization, and guarded MCP execution.
+Civitas is an autonomous multi-agent food-procurement system that combines negotiation, evidence-lineage analysis, adaptive replanning, deterministic optimization, and guarded MCP execution. Its target product interface is a Codex-compatible MCP server: operators state a procurement goal conversationally, Codex invokes Civitas's intent-level tools, and Civitas owns the complete planning and safety workflow.
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The repository contains the integrated MVP and its deterministic false-consensus demonstration. See [PLAN.md](PLAN.md) for the delivery plan, [AGENTS.md](AGENTS.md) for behavioral and engineering requirements, [TECH_STACK.md](TECH_STACK.md) for approved technologies, and [SECURITY.md](SECURITY.md) for trust boundaries and the latest audit status.
+The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository currently contains the integrated viewer-based MVP and its deterministic false-consensus demonstration; the inbound Civitas MCP facade described in [MCP_INTERFACE.md](MCP_INTERFACE.md) is the next product integration milestone. Its parallel implementation is divided in [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md). See [PLAN.md](PLAN.md) for the overall delivery plan, [AGENTS.md](AGENTS.md) for behavioral and engineering requirements, [TECH_STACK.md](TECH_STACK.md) for approved technologies, and [SECURITY.md](SECURITY.md) for trust boundaries and the latest audit status.
+
+## Product interface
+
+The intended deployment has MCP on both sides of the application:
+
+```text
+Operator → Codex → Civitas MCP server → planning / Jury / execution services
+                                      → procurement-provider MCP servers
+```
+
+Codex is responsible for conversation, intent capture, progress narration, and presenting approval requests. Civitas remains authoritative for typed inputs, evidence retrieval, optimization, Parliament, Jury and Dissent, replanning, freshness revalidation, approval binding, idempotency, and execution audit. A model or chat message cannot bypass those controls.
+
+The primary interaction should be as small as:
+
+```text
+User: Protect seven days of demand across our warehouses while minimizing waste.
+Codex: Civitas found false consensus on a stale lead-time source and replanned.
+       The revised plan has Integrity 92/100 and all hard gates pass.
+       Approve the exact plan for execution?
+```
 
 ## Development
 
@@ -32,7 +52,7 @@ pnpm typecheck
 pnpm build
 ```
 
-Run the backend API and the viewer locally with:
+Run the current demonstration API and optional audit viewer locally with:
 
 ```bash
 uv run uvicorn civitas.api.app:create_app --factory --host 127.0.0.1 --port 8001
@@ -59,7 +79,7 @@ Run the integration-focused checks with:
 uv run pytest tests/integration/test_demo_api.py tests/unit/execution/test_service.py tests/contract/test_mcp_integration.py -q
 ```
 
-Open the viewer at `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
+Until the inbound MCP facade is implemented, open the optional viewer at `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
 
 ```text
 evidence retrieval

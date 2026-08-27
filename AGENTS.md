@@ -72,6 +72,15 @@ The Jury is therefore part of the autonomous planning loop.
 
 It is **not** a final dashboard or post-hoc evaluator.
 
+The primary product interface is conversational:
+
+```text
+OPERATOR → CODEX → CIVITAS MCP SERVER → CONTROL LOOP
+                                      → OPERATIONAL MCP PROVIDERS
+```
+
+Codex captures intent and presents progress, decisions, and approval challenges. Civitas—not Codex—owns planning state, solver quantities, evidence, Jury policy, approval binding, freshness checks, and execution.
+
 ## 2.1 Approved Architecture Amendments
 
 The following rules are authoritative wherever an older example in this document is ambiguous.
@@ -145,9 +154,13 @@ No side effect may occur in a resumable workflow node unless it is idempotent or
 
 Every Parliament → Jury → investigation loop must define maximum cycles, model/tool budget, deadline, repeated-evidence detection, no-feasible-plan handling, and escalation behavior. Reaching a bound produces ESCALATE; it must not silently approve or loop forever.
 
-### MVP frontend
+### Primary MCP interface and optional viewer
 
-Use React + Vite for the MVP client. The application is currently an interactive decision-process viewer and does not require server-side rendering. Reconsider a full-stack frontend framework only when SSR, frontend server routes, or framework-specific authentication becomes a concrete requirement.
+Expose Civitas to Codex through an inbound MCP server with a small set of intent-level tools. The inbound server delegates to the same application services used by the guarded API; it must not expose repositories, arbitrary SQL, raw provider credentials, unrestricted outbound tool calls, or a second execution path.
+
+Civitas separately consumes operational MCP providers for evidence reads and approved writes. Treat inbound agent orchestration and outbound procurement access as different trust boundaries with separate authentication, organization scope, permissions, and audit records.
+
+Use React + Vite only for the optional read-only evidence and execution-audit viewer. Normal procurement operation must not require a dashboard. The viewer may deep-link from an MCP result, but any approval or execution action must use the same immutable challenge and guarded service as MCP.
 
 ## 2.2 Approved Domain Schema Decision
 
@@ -1074,7 +1087,25 @@ Planner:
 
 # 17. MCP Integration
 
-MCP is the operational interface between agents and the procurement environment.
+MCP is both the primary product interface and the operational interface. Do not conflate these boundaries.
+
+## 17.1 Inbound Civitas MCP server
+
+Codex calls intent-level Civitas tools:
+
+```text
+plan_procurement_goal
+get_planning_run
+get_decision_summary
+prepare_execution
+approve_execution
+execute_approved_plan
+get_execution_audit
+```
+
+These tools orchestrate application services. They do not let Codex directly run Parliament nodes, invent allocations, query generic repositories, or invoke provider write tools. Responses use strict shared contracts and include organization, run, policy, and stable action identifiers.
+
+## 17.2 Outbound operational MCP clients
 
 The system should use the participating partner's MCP server whenever possible.
 
@@ -1096,6 +1127,10 @@ update_inventory()
 The actual available MCP tools depend on the partner.
 
 Every MCP result used in reasoning should be recorded as evidence.
+
+## 17.3 Conversational approval
+
+A natural-language confirmation is not sufficient execution authority. `prepare_execution` produces a short-lived challenge bound to an immutable plan hash, approved totals, operator, organization, and policy version. `execute_approved_plan` requires that approval plus an idempotency key and reruns freshness, feasibility, Integrity, and transaction checks. A material change invalidates the challenge and returns to investigation or escalation.
 
 ---
 
@@ -1128,6 +1163,19 @@ execution
 ---
 
 # 19. Primary Demo Scenario
+
+The primary demo runs in Codex. The audit viewer is optional and should be opened only to inspect lineage or execution detail.
+
+The opening interaction is:
+
+```text
+Operator:
+Protect the next seven days of demand across all warehouses
+while minimizing cost and food waste.
+
+Codex:
+Starts Civitas through MCP and narrates only material transitions.
+```
 
 The demo should use a procurement problem containing:
 
@@ -1348,7 +1396,9 @@ The key lesson demonstrated is:
 
 # 26. User Interface
 
-The UI should prioritize the autonomous process.
+The primary interface is the Codex conversation. It should present the goal, material workflow transitions, decision summary, business impact, hard gates, approval challenge, and execution receipt without requiring the operator to navigate a dashboard.
+
+The following views belong to the optional read-only audit application. The audit UI should prioritize the autonomous process and must not become a separate authorization boundary.
 
 ## View 1 — Goal
 
@@ -1442,9 +1492,11 @@ PROCUREMENT ORDER CREATED ✓
 The MVP must contain:
 
 ```text
+[ ] Codex-compatible inbound Civitas MCP server
+[ ] Intent-level planning, decision, approval, execution, and audit tools
 [ ] Planner Agent
 [ ] At least 4 specialized Parliament agents
-[ ] Partner MCP integration
+[ ] Outbound partner MCP integration
 [ ] MCP-driven data retrieval
 [ ] Structured agent proposals
 [ ] Parliament negotiation
@@ -1455,8 +1507,9 @@ The MVP must contain:
 [ ] Decision Integrity Score
 [ ] Jury → Planner feedback
 [ ] Replanning
-[ ] Real MCP execution
-[ ] Visual evidence graph
+[ ] Explicit immutable-plan approval challenge
+[ ] Real idempotent MCP execution
+[ ] Optional visual evidence graph
 ```
 
 ---

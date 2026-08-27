@@ -283,7 +283,12 @@ Evidence-backed autonomous decision
 # 8. Target Architecture
 
 ```text
-                         USER
+                       OPERATOR
+                           │
+                           ▼
+                         CODEX
+                           │
+                 INBOUND CIVITAS MCP
                            │
                            ▼
                   PROCUREMENT GOAL
@@ -305,7 +310,7 @@ Evidence-backed autonomous decision
          │                 │                 │
          └─────────────────┼─────────────────┘
                            │
-                     MCP / DATA LAYER
+              OUTBOUND MCP / DATA LAYER
                            │
                            ▼
                     EVIDENCE + CLAIMS
@@ -354,7 +359,7 @@ These amendments are implementation requirements and take precedence over simpli
 5. **Provider adapter:** domain code invokes an application-owned model interface. Groq with `openai/gpt-oss-120b` is the initial provider implementation and must pass structured-output, tool-use, timeout, retry, and usage-metadata contract tests.
 6. **Execution safety:** every MCP write passes freshness revalidation and policy approval, uses an idempotency key, writes an immutable audit record, prevents duplicates, and records failure or compensation state.
 7. **Termination policy:** each autonomous loop has cycle, cost/tool, and time limits; detects repeated evidence; handles infeasibility; and escalates when a bound is reached.
-8. **MVP client:** use React + Vite. Reconsider Next.js only when a concrete SSR, frontend server-route, or framework-authentication requirement appears.
+8. **Primary product interface:** expose a small intent-level Civitas MCP server to Codex. Codex handles conversation and presentation; Civitas owns workflow state and every deterministic authorization boundary. Use React + Vite only as an optional read-only evidence and execution-audit viewer.
 
 The approved technical decisions and their versioned v1 policies are recorded below. Future changes to these decisions require explicit approval and a new policy or architecture-decision version where indicated.
 
@@ -618,6 +623,26 @@ consumption rate
 
 # 11. MCP Integration
 
+MCP exists on both sides of Civitas and the two boundaries must remain distinct.
+
+## 11.1 Inbound product interface
+
+Codex invokes a small set of Civitas workflow tools:
+
+```text
+plan_procurement_goal()
+get_planning_run()
+get_decision_summary()
+prepare_execution()
+approve_execution()
+execute_approved_plan()
+get_execution_audit()
+```
+
+These tools accept and return strict application-owned contracts. They delegate to the same guarded application services as any optional UI and do not expose repositories, arbitrary SQL, low-level Parliament transitions, or direct provider writes.
+
+## 11.2 Outbound operational interface
+
 A participating partner's MCP server becomes the system's **real operational environment**.
 
 The agents should use MCP tools to retrieve and possibly update real/simulated business state.
@@ -658,6 +683,12 @@ Decision
 ```
 
 This allows Agent Jury to trace where a claim came from.
+
+Codex must not receive these outbound operational tools directly. Dissent receives only independently namespaced read tools. The guarded execution service receives only the write tools needed for an approved action.
+
+## 11.3 Conversation versus authority
+
+Codex may interpret a user's goal and summarize Civitas responses. It cannot make an LLM-generated quantity executable or treat a bare conversational confirmation as sufficient approval. Execution requires a short-lived challenge bound to the immutable plan hash, organization, operator, approved totals, and policy version, followed by freshness revalidation and an idempotent write.
 
 ---
 
@@ -1381,11 +1412,24 @@ Decision Integrity
 
 ---
 
-# 28. UI
+# 28. Primary Interaction and Optional Audit UI
 
-The UI should focus on **the decision process**, not a generic enterprise dashboard.
+The primary interaction is a Codex conversation, not a dashboard. The operator states a goal, receives material progress updates, reviews the exact decision summary and business impact, and explicitly approves a short-lived execution challenge.
 
-## Screen 1 — Procurement Request
+```text
+Operator:
+Protect seven days of demand while minimizing cost and food waste.
+
+Codex:
+Five roles preferred Supplier A, but their support collapses to one stale
+source. Dissent found a current 10-day lead time. Civitas blocked that plan,
+replanned with Supplier B, and now has Integrity 92/100 with all gates passed.
+Approve the exact revised plan?
+```
+
+The React UI is an optional, read-only deep audit view. It should focus on **the decision process**, not a generic enterprise dashboard, and must never provide an alternative execution path.
+
+## Audit View 1 — Procurement Request
 
 ```text
 7-Day Procurement Goal
@@ -1402,7 +1446,7 @@ Projected shortage:
 
 ---
 
-## Screen 2 — Parliament
+## Audit View 2 — Parliament
 
 Display agents as participants.
 
@@ -1825,8 +1869,9 @@ agent-jury/
 │   └── integrity.py
 │
 ├── mcp/
-│   ├── client.py
-│   └── tools.py
+│   ├── inbound_server.py
+│   ├── outbound_client.py
+│   └── contracts.py
 │
 ├── environment/
 │   ├── inventory.py
@@ -1839,7 +1884,7 @@ agent-jury/
 │   ├── metrics.py
 │   └── tests.py
 │
-├── ui/
+├── audit_viewer/
 │
 ├── app.py
 ├── README.md
@@ -1849,6 +1894,8 @@ agent-jury/
 ---
 
 # 45. Implementation Priority
+
+The Codex/MCP product work is divided into merge-safe branches with owned paths and acceptance tests in [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md). That work plan is authoritative for parallel ownership and merge order.
 
 ## Phase 1 — Core Environment
 
@@ -1873,8 +1920,12 @@ Use deterministic data initially.
 Implement:
 
 ```text
-[ ] MCP connection
-[ ] Read tools
+[ ] Inbound Civitas MCP server
+[ ] Intent-level Codex tool contracts
+[ ] Local STDIO and deployed Streamable HTTP transports
+[ ] Organization and operator authentication
+[ ] Outbound MCP connection
+[ ] Operational read tools
 [ ] Structured tool responses
 [ ] Tool result → evidence conversion
 [ ] At least one write/action tool
@@ -1958,7 +2009,7 @@ Implement:
 
 ---
 
-## Phase 8 — UI
+## Phase 8 — Optional Audit Viewer
 
 Only after the complete pipeline works.
 
@@ -1978,16 +2029,18 @@ Priority:
 If time becomes limited, the MVP is:
 
 ```text
-1. Planner
-2. 4 specialized agents
-3. MCP integration
-4. Parliament negotiation
-5. Evidence graph
-6. Independence analysis
-7. Dissent agent
-8. Decision Integrity Score
-9. Jury → Replan loop
-10. Real MCP action
+1. Inbound Codex-compatible Civitas MCP server
+2. Planner
+3. 4 specialized agents
+4. Outbound operational MCP integration
+5. Parliament negotiation
+6. Evidence graph
+7. Independence analysis
+8. Dissent agent
+9. Decision Integrity Score
+10. Jury → Replan loop
+11. Explicit guarded approval
+12. Real idempotent MCP action
 ```
 
 Everything else can be added later.
@@ -2126,7 +2179,7 @@ The user should be able to say:
 
 > **“Procure enough food for the next seven days, minimize cost and waste, and distribute it across our warehouses.”**
 
-The system independently plans and investigates.
+Codex sends the goal to Civitas through MCP. The system independently plans and investigates.
 
 Agents disagree.
 
@@ -2144,7 +2197,7 @@ Jury approves.
 
 The system executes the procurement action.
 
-The user sees:
+Codex presents a compact decision and approval request. The optional viewer can show the complete evidence graph:
 
 ```text
 ┌──────────────────────────────────────────────┐
@@ -2176,17 +2229,17 @@ The demo should revolve around one sentence:
 Sequence:
 
 ```text
-1. User gives procurement goal.
+1. User gives Codex a procurement goal.
 
-2. Planner decomposes the task.
+2. Codex invokes the Civitas MCP server.
 
-3. Agents query MCP.
+3. Planner decomposes the task.
 
-4. Agents produce conflicting proposals.
+4. Civitas queries operational MCP providers.
 
-5. Parliament negotiates.
+5. Agents produce conflicting proposals.
 
-6. Parliament reaches consensus.
+6. Parliament negotiates and reaches consensus.
 
 7. Jury reconstructs evidence.
 
@@ -2202,9 +2255,11 @@ Sequence:
 
 13. Jury approves.
 
-14. MCP executes procurement.
+14. Codex presents the immutable plan and asks for explicit approval.
 
-15. Final evidence graph explains the entire decision.
+15. Civitas revalidates and executes procurement idempotently through MCP.
+
+16. Codex returns the receipt; the optional audit view explains the lineage.
 ```
 
 ---
@@ -2232,7 +2287,7 @@ PLANNER
 → responds to uncertainty
 
 MCP
-→ connects reasoning to the real operational environment
+→ lets Codex invoke Civitas and connects Civitas to the real operational environment
 
 EXECUTION
 → turns the decision into action
@@ -2242,7 +2297,7 @@ EXECUTION
 
 # 54. One-Line Product Description
 
-> **Agent Jury + Agent Parliament is an evidence-aware multi-agent procurement system where autonomous agents negotiate competing objectives, while a Jury verifies the independence and integrity of the evidence behind their collective decisions before allowing real-world actions.**
+> **Civitas is a Codex-connected procurement agent where specialized agents negotiate solver-backed plans and a Jury verifies the evidence behind their agreement before any real-world action is allowed.**
 
 ---
 
