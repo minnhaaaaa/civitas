@@ -198,6 +198,14 @@ async def test_dispatch_delegates_once_and_rejects_unknown_fields(server: Inboun
 
 
 @pytest.mark.asyncio
+async def test_sdk_callbacks_remain_bound_to_their_own_tool(server: InboundMCPServer) -> None:
+    result = await server.mcp._tool_manager._tools["get_decision_summary"].run(
+        {"run_id": "run-1"}
+    )
+    assert result["run_id"] == "run-1"
+
+
+@pytest.mark.asyncio
 async def test_service_errors_are_stable_and_not_stack_traces(server: InboundMCPServer) -> None:
     class RejectingService(FakeService):
         async def get_decision_summary(

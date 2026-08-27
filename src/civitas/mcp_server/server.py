@@ -12,7 +12,8 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from mcp.server.fastmcp import FastMCP
-from pydantic import ValidationError
+from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
+from pydantic import ValidationError, create_model
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -145,18 +146,30 @@ class InboundMCPServer:
         self._mcp.run(transport="stdio")
 
     def _register_tool(self, tool_name: str, request_type: type[ProductContract]) -> None:
-        async def handler(**payload: object) -> dict[str, object]:
-            return await self.dispatch(tool_name, payload)
+        # Bind the name now: a closure over the registration loop variable would
+        # route every SDK callback to the final registered tool.
+        def build_handler(bound_tool_name: str) -> Callable[..., Awaitable[dict[str, object]]]:
+            async def handler(**payload: object) -> dict[str, object]:
+                return await self.dispatch(bound_tool_name, payload)
+
+            return handler
 
         self._mcp.add_tool(
-            handler,
+            build_handler(tool_name),
             name=tool_name,
             description=f"Civitas intent-level operation: {tool_name}.",
             structured_output=False,
         )
         # FastMCP cannot infer a flattened Pydantic request from ``**payload``.
-        # Reuse Agent 0's exact schema rather than maintaining a duplicate SDK schema.
-        self._mcp._tool_manager._tools[tool_name].parameters = request_type.model_json_schema()
+        # Reuse Agent 0's exact schema and validation model rather than maintaining
+        # a duplicate SDK contract.
+        tool = self._mcp._tool_manager._tools[tool_name]
+        argument_model = create_model(
+            f"{request_type.__name__}MCPArguments",
+            __base__=(request_type, ArgModelBase),
+        )
+        tool.parameters = request_type.model_json_schema()
+        tool.fn_metadata = FuncMetadata(arg_model=argument_model)
 
     @staticmethod
     def _error(code: ProductErrorCode, message: str, retryable: bool) -> dict[str, object]:
