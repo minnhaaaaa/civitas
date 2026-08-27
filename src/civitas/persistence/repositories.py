@@ -1,7 +1,7 @@
 """Repository implementations translating domain objects to ORM rows."""
 
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,8 @@ from civitas.domain.planning import (
     Warehouse,
 )
 from civitas.persistence.models import (
+    ApprovalChallengeModel,
+    ApprovalReceiptModel,
     DemandForecastModel,
     OrganizationModel,
     PlanningRunModel,
@@ -267,3 +269,58 @@ def _offer_to_model(entity: SupplierOffer) -> SupplierOfferModel:
 class SupplierOfferRepository(SQLAlchemyRepository[SupplierOffer, SupplierOfferModel]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, SupplierOfferModel, _offer_to_domain, _offer_to_model)
+
+
+class ApprovalRepository:
+    """Organization-scoped approval ledger queries.
+
+    The explicit predicates are intentional: authorization is enforced at the
+    persistence boundary even if a transport adapter is compromised.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def challenge_for_operator_for_update(
+        self, *, challenge_id: str, organization_id: str, operator_id: str
+    ) -> ApprovalChallengeModel | None:
+        return cast(
+            ApprovalChallengeModel | None,
+            await self._session.scalar(
+                select(ApprovalChallengeModel)
+                .where(
+                    ApprovalChallengeModel.id == challenge_id,
+                    ApprovalChallengeModel.organization_id == organization_id,
+                    ApprovalChallengeModel.operator_id == operator_id,
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def receipt_for_operator_for_update(
+        self, *, receipt_id: str, organization_id: str, operator_id: str
+    ) -> ApprovalReceiptModel | None:
+        return cast(
+            ApprovalReceiptModel | None,
+            await self._session.scalar(
+                select(ApprovalReceiptModel)
+                .where(
+                    ApprovalReceiptModel.id == receipt_id,
+                    ApprovalReceiptModel.organization_id == organization_id,
+                    ApprovalReceiptModel.operator_id == operator_id,
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def receipt_for_challenge_for_update(
+        self, *, challenge_id: str
+    ) -> ApprovalReceiptModel | None:
+        return cast(
+            ApprovalReceiptModel | None,
+            await self._session.scalar(
+                select(ApprovalReceiptModel)
+                .where(ApprovalReceiptModel.challenge_id == challenge_id)
+                .with_for_update()
+            ),
+        )

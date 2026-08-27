@@ -487,3 +487,63 @@ class ExecutionAuditModel(TimestampMixin, Base):
     failure_code: Mapped[str | None] = mapped_column(String(128))
     compensation_status: Mapped[str | None] = mapped_column(String(32))
     external_references: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class ApprovalChallengeModel(Base):
+    """A short-lived, organization-scoped authorization for one immutable plan."""
+
+    __tablename__ = "approval_challenges"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'approved', 'invalidated', 'expired')",
+            name="ck_approval_challenges_state",
+        ),
+        CheckConstraint("expires_at > issued_at", name="ck_approval_challenges_expiry"),
+        Index("ix_approval_challenges_org_run", "organization_id", "planning_run_id"),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    planning_run_id: Mapped[str] = mapped_column(
+        ForeignKey("planning_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    selected_plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    approved_totals: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    secret_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidation_reason: Mapped[str | None] = mapped_column(String(128))
+
+
+class ApprovalReceiptModel(Base):
+    """Persisted evidence that a challenge was approved by its bound operator."""
+
+    __tablename__ = "approval_receipts"
+    __table_args__ = (
+        UniqueConstraint("challenge_id", name="uq_approval_receipts_challenge"),
+        CheckConstraint("expires_at > approved_at", name="ck_approval_receipts_expiry"),
+        Index("ix_approval_receipts_org_run", "organization_id", "planning_run_id"),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    challenge_id: Mapped[str] = mapped_column(
+        ForeignKey("approval_challenges.id", ondelete="RESTRICT"), nullable=False
+    )
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    operator_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    planning_run_id: Mapped[str] = mapped_column(
+        ForeignKey("planning_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    selected_plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    approved_totals: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_idempotency_key: Mapped[str | None] = mapped_column(String(255))
