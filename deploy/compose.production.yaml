@@ -1,0 +1,43 @@
+# Production-oriented overlay.  Supply secrets through the platform secret
+# manager; this file deliberately contains no credentials or published database
+# port.  TLS terminates at an authenticated reverse proxy/load balancer.
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?inject at runtime}
+
+  api:
+    environment:
+      CIVITAS_ENV: production
+      CIVITAS_LOG_FORMAT: json
+      CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?inject at runtime}
+      CIVITAS_OAUTH_ISSUER: ${CIVITAS_OAUTH_ISSUER:-}
+      CIVITAS_OAUTH_AUDIENCE: ${CIVITAS_OAUTH_AUDIENCE:-}
+    ports: !reset []
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  worker:
+    environment:
+      CIVITAS_ENV: production
+      CIVITAS_LOG_FORMAT: json
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  mcp-server:
+    environment:
+      CIVITAS_ENV: production
+      CIVITAS_LOG_FORMAT: json
+      CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?inject at runtime}
+      CIVITAS_OAUTH_ISSUER: ${CIVITAS_OAUTH_ISSUER:-}
+      CIVITAS_OAUTH_AUDIENCE: ${CIVITAS_OAUTH_AUDIENCE:-}
+    ports: !reset []
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]

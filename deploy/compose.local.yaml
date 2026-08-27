@@ -1,0 +1,95 @@
+name: civitas
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-civitas}
+      POSTGRES_USER: ${POSTGRES_USER:-civitas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${CIVITAS_POSTGRES_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - civitas-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  migrations:
+    build:
+      context: ..
+    image: civitas:local
+    environment: &civitas-environment
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-civitas}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-civitas}
+      CIVITAS_LOG_FORMAT: json
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: civitas:local
+    environment: *civitas-environment
+    command: ["uvicorn", "civitas.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    ports:
+      - "${CIVITAS_API_PORT:-8000}:8000"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "scripts/http_healthcheck.py", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # This service becomes available after the Agent 4 durable worker package is merged.
+  worker:
+    profiles: ["mcp"]
+    image: civitas:local
+    environment: *civitas-environment
+    command: ["python", "scripts/run_worker.py"]
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    init: true
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  # The authenticated Streamable HTTP MCP server supplied by Agent 1. Its
+  # runtime command is explicit so deployment never invents an alternate path.
+  mcp-server:
+    profiles: ["mcp"]
+    image: civitas:local
+    environment: *civitas-environment
+    command: ["python", "scripts/run_mcp_server.py"]
+    ports:
+      - "${CIVITAS_MCP_PORT:-8001}:8001"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # This is intentionally separate from the application trust boundary. The
+  # provider simulator is for deterministic local MCP integration only.
+  simulated-provider:
+    profiles: ["mcp"]
+    image: civitas:local
+    environment: *civitas-environment
+    command: ["python", "scripts/run_simulated_provider.py"]
+    init: true
+    stop_grace_period: 15s
+    restart: unless-stopped
+
+volumes:
+  civitas-postgres-data:

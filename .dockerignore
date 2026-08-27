@@ -1,0 +1,13 @@
+.git
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.hypothesis
+node_modules
+apps/web/node_modules
+apps/web/dist
+__pycache__
+*.py[cod]
+.env
+postgres-data
