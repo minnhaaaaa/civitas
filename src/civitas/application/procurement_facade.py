@@ -231,12 +231,15 @@ def _optimization_request(run_id: str, goal: ProcurementGoal) -> OptimizationReq
     constraints = dict(goal.constraints)
     input_data_version = str(constraints.pop("input_data_version", "pending-evidence"))
     objectives_version = str(constraints.pop("objectives_version", "feasibility-first-v1"))
+    maximum_alternatives = constraints.get("maximum_alternatives", 5)
+    if isinstance(maximum_alternatives, bool) or not isinstance(maximum_alternatives, int):
+        maximum_alternatives = 5
     return OptimizationRequest(
         planning_run_id=run_id,
         input_data_version=input_data_version,
         objectives_version=objectives_version,
         constraints=constraints,
-        maximum_alternatives=int(constraints.get("maximum_alternatives", 5)),
+        maximum_alternatives=maximum_alternatives,
     )
 
 

@@ -116,7 +116,8 @@ class FakeService:
                 selected_plan_hash=PLAN_HASH,
                 policy_version="integrity-v1",
                 approved_totals=ApprovedTotals(
-                    currency="USD", maximum_landed_cost=Decimal("12"),
+                    currency="USD",
+                    maximum_landed_cost=Decimal("12"),
                     maximum_procurement_lines=1,
                     maximum_distribution_lines=0,
                 ),
@@ -153,7 +154,8 @@ class FakeService:
             selected_plan_hash=PLAN_HASH,
             policy_version="integrity-v1",
             approved_totals=ApprovedTotals(
-                currency="USD", maximum_landed_cost=Decimal("12"),
+                currency="USD",
+                maximum_landed_cost=Decimal("12"),
                 maximum_procurement_lines=1,
                 maximum_distribution_lines=0,
             ),
@@ -199,9 +201,7 @@ async def test_dispatch_delegates_once_and_rejects_unknown_fields(server: Inboun
 
 @pytest.mark.asyncio
 async def test_sdk_callbacks_remain_bound_to_their_own_tool(server: InboundMCPServer) -> None:
-    result = await server.mcp._tool_manager._tools["get_decision_summary"].run(
-        {"run_id": "run-1"}
-    )
+    result = await server.mcp._tool_manager._tools["get_decision_summary"].run({"run_id": "run-1"})
     assert result["run_id"] == "run-1"
 
 

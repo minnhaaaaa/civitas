@@ -19,7 +19,7 @@ MAX_MCP_JSON_DEPTH = 32
 _MCP_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
 
 
-def _validate_bounded_json(value: JsonValue, *, field_name: str) -> JsonValue:
+def _validate_bounded_json(value: JsonObject, *, field_name: str) -> JsonObject:
     """Reject excessively deep or large untrusted MCP JSON before use."""
 
     if _json_depth(value) > MAX_MCP_JSON_DEPTH:

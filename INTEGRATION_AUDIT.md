@@ -1,11 +1,11 @@
 # End-to-end integration audit
 
 Audit date: 2026-08-27  
-Branch: `integration/end-to-end`
+Branch: `mcp/end-to-end`
 
 ## Executive result
 
-The deterministic false-consensus demonstration works end to end with simulated providers. The repository is not yet a production deployment. The approved product direction now makes a Codex-compatible inbound MCP server the primary interface and demotes the React application to an optional audit viewer; that inbound facade is documented but not implemented at this audit revision. The complete test suite, strict Python type checking, Python lint/format checks, frontend lint/type checking, production frontend build, Alembic upgrade, and dependency advisory scans pass.
+The deterministic false-consensus demonstration works end to end with simulated providers. The MCP integration branch also verifies the complete Codex tool sequence through the real inbound adapter and application facade using deterministic fakes. The repository is not yet a production deployment: its deployable composition root still needs PostgreSQL workflow persistence, a durable worker, authenticated operator resolution, and a real outbound provider. The complete Python test suite passes at this audit revision.
 
 No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy expressions use bound parameters. No committed private key or provider credential was found. `pip-audit` and `pnpm audit --prod --audit-level high` reported no known vulnerable installed dependencies at audit time.
 
@@ -22,7 +22,7 @@ No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy 
 | 6 — Evaluation | Complete | Ten deterministic scenarios, hidden/visible separation, interventions, lineage expectations, independent verification, Hypothesis generation, metrics, and reports exist. |
 | 7 — Audit viewer | Complete for demo | The optional Vite/React viewer provides the goal, Parliament story, alternatives, evidence graph, separate Integrity components and gates, replanning, execution status, typed SSE, and mock playback. |
 | 8 — API/execution | Complete at tested boundary | Authenticated organization-scoped guarded routes, cursor/`Last-Event-ID`, freshness checks, plan/Jury binding, FEFO reservations, idempotency locking, MCP writes, and compensation states are integration-tested. Deployment composition is environment-specific. |
-| 9 — End-to-end | Complete for simulated demo | The UI and demo API exercise evidence retrieval → Parliament → solver alternatives → Jury/Dissent → replanning → approval → freshness checks → one idempotent mock MCP write. |
+| 9 — End-to-end | Complete for deterministic integration | Merged the available MCP branches and added a transport → facade test covering planning, decision, immutable challenge, approval, execution, duplicate retry, and audit retrieval. The UI/demo API separately exercise evidence retrieval → Parliament → solver alternatives → Jury/Dissent → replanning. |
 
 ## Security and correctness defects fixed
 
@@ -42,13 +42,12 @@ No request-controlled raw SQL or SQL string interpolation was found. SQLAlchemy 
 
 ## Remaining work before production
 
-1. Implement the intent-level inbound Civitas MCP facade described in `MCP_INTERFACE.md`, reusing guarded application services rather than creating a second execution path.
-2. Add local STDIO and deployed Streamable HTTP composition, with organization/operator authentication and short-lived plan-hash approval challenges.
-3. Compose the guarded API factory, database, provider credentials, policy identity, and operator identity in a deployment entry point. The default app remains the offline demo.
-4. Implement the generic investigation step as a durable read-only outbound MCP worker instead of relying on a callback or demo-specific orchestration.
-5. Decide whether Parliament explanations should use the model adapter. Solver ownership and deterministic scorecards must remain authoritative.
-6. Replace generic unscoped repository access with organization-required repository methods before exposing those repositories to additional APIs, MCP tools, or workers.
-7. If LangGraph-native persistence is required, replace the topology-only compiled graph with a real checkpointer; current resume durability comes from PostgreSQL event snapshots.
-8. Add deployment controls: TLS termination, OAuth or secret-manager integration, credential rotation, operator roles, rate limiting, structured security logs, backups, and provider compensation implementations.
+1. Add local STDIO and deployed Streamable HTTP composition that supplies a real `ProductService`, organization/operator authentication, and short-lived plan-hash approval challenges.
+2. Compose the guarded API factory, database, provider credentials, policy identity, and operator identity in a deployment entry point. The default app remains the offline demo.
+3. Back the durable worker's checkpoint-store port with PostgreSQL and connect its read-only Dissent investigation worker to the workflow transition.
+4. Decide whether Parliament explanations should use the model adapter. Solver ownership and deterministic scorecards must remain authoritative.
+5. Replace generic unscoped repository access with organization-required repository methods before exposing those repositories to additional APIs, MCP tools, or workers.
+6. If LangGraph-native persistence is required, replace the topology-only compiled graph with a real checkpointer; current resume durability comes from PostgreSQL event snapshots.
+7. Add deployment controls: TLS termination, OAuth or secret-manager integration, credential rotation, operator roles, rate limiting, structured security logs, backups, and provider compensation implementations.
 
 The branch history does not match the proposed one-branch-per-agent merge narrative. Git contains dedicated foundation and persistence commits, while optimization/evidence branch pointers remained at the foundation commit and the remaining features arrived together in `b262aed`. This is traceability debt, not a runtime defect; the audit assessed the integrated tree rather than inferring completion from branch names.

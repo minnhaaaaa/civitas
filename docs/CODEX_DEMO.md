@@ -12,7 +12,7 @@ For the current offline scenario fixtures, run:
 uv run pytest tests/golden/test_scenarios.py -q
 ```
 
-Confirm the MCP server process is available over STDIO before opening Codex. The checked-in plugin configuration starts it from the repository root:
+The checked-in plugin configuration shows the intended STDIO command:
 
 ```json
 {
@@ -22,7 +22,11 @@ Confirm the MCP server process is available over STDIO before opening Codex. The
 }
 ```
 
-The `civitas.mcp_server` entry point is supplied by the inbound-server workstream. It authenticates the operator context out of band; do not add credentials to this file.
+`civitas.mcp_server` deliberately fails closed until a deployment composition supplies a real `ProductService` and authenticated operator context. Do not add credentials to this file. Use the deterministic transport-to-facade test below to verify the complete local tool sequence; provision the production composition before attempting this script in Codex.
+
+```bash
+uv run pytest tests/end_to_end/mcp/test_product_sequence.py -q
+```
 
 ## Judge script
 

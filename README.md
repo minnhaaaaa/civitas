@@ -4,7 +4,7 @@ Civitas is an autonomous multi-agent food-procurement system that combines negot
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository currently contains the integrated viewer-based MVP and its deterministic false-consensus demonstration; the inbound Civitas MCP facade described in [MCP_INTERFACE.md](MCP_INTERFACE.md) is the next product integration milestone. Its parallel implementation is divided in [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md). See [PLAN.md](PLAN.md) for the overall delivery plan, [AGENTS.md](AGENTS.md) for behavioral and engineering requirements, [TECH_STACK.md](TECH_STACK.md) for approved technologies, and [SECURITY.md](SECURITY.md) for trust boundaries and the latest audit status.
+The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, the transport-neutral procurement facade, a deterministic integration suite, and the viewer-based false-consensus demonstration. The deployment composition that connects those pieces to PostgreSQL, a durable worker, and real procurement providers remains environment-specific. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
 
 ## Product interface
 
@@ -79,7 +79,7 @@ Run the integration-focused checks with:
 uv run pytest tests/integration/test_demo_api.py tests/unit/execution/test_service.py tests/contract/test_mcp_integration.py -q
 ```
 
-Until the inbound MCP facade is implemented, open the optional viewer at `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
+For the offline viewer demonstration, open `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
 
 ```text
 evidence retrieval

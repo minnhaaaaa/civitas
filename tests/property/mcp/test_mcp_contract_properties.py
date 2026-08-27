@@ -34,12 +34,11 @@ def test_tool_names_are_never_interpreted_as_free_form_commands(tool_name: str) 
         "arguments": {},
         "access_mode": "read",
     }
-    permitted = (
-        tool_name[0] in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        and all(
-            character in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
-            for character in tool_name
-        )
+    permitted = tool_name[
+        0
+    ] in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" and all(
+        character in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+        for character in tool_name
     )
     if permitted:
         assert MCPToolCall.model_validate(payload).tool_name == tool_name

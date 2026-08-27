@@ -41,7 +41,7 @@ Model output is treated as untrusted: responses are capped at 1 MiB, parsed as J
 
 ## Known integration limitations
 
-- The Codex-facing inbound MCP facade is an approved target interface but is not yet implemented. The current runnable product surface is the demonstration API and optional React viewer.
+- The Codex-facing inbound MCP adapter and transport-neutral product facade are implemented and covered by deterministic end-to-end contract tests. A deployable composition root that wires them to PostgreSQL workflow persistence, the durable worker, production identity resolution, and a real provider is not yet supplied. The current runnable product surface remains the offline demonstration API and optional React viewer.
 
 - The generic Parliament workflow currently uses deterministic role implementations. The Groq adapter is contract-tested but is not yet composed into those roles for explanatory challenge text.
 - The generic investigation transition accepts a replanner callback; the demo performs real read-only MCP investigation around that transition. A production composition still needs a durable investigation worker.
