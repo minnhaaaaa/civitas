@@ -4,7 +4,7 @@ Civitas is an autonomous multi-agent food-procurement system that combines negot
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, the transport-neutral procurement facade, a deterministic integration suite, and the viewer-based false-consensus demonstration. The deployment composition that connects those pieces to PostgreSQL, a durable worker, and real procurement providers remains environment-specific. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
+The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, a validated MCP composition entry point, PostgreSQL-backed resumable workflow execution, the transport-neutral procurement facade, a deterministic integration suite, and the viewer-based false-consensus demonstration. Provider, guarded-execution, and production identity adapters remain separate bounded workstreams. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
 
 ## Product interface
 

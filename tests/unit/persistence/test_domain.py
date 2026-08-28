@@ -56,6 +56,7 @@ def test_metadata_contains_canonical_persistence_tables() -> None:
         "candidate_plans",
         "jury_decisions",
         "workflow_events",
+        "workflow_checkpoints",
         "execution_audits",
     }
 

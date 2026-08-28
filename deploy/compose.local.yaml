@@ -25,6 +25,10 @@ services:
     image: civitas:local
     environment: &civitas-environment
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-civitas}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-civitas}
+      CIVITAS_APPROVAL_SECRET_PEPPER: ${CIVITAS_APPROVAL_SECRET_PEPPER:?set a 32-byte approval pepper}
+      CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?set a 32-character bearer token}
+      CIVITAS_ORGANIZATION_ID: ${CIVITAS_ORGANIZATION_ID:?bind an organization}
+      CIVITAS_OPERATOR_ID: ${CIVITAS_OPERATOR_ID:?bind an operator}
       CIVITAS_LOG_FORMAT: json
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -51,12 +55,14 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
-  # This service becomes available after the Agent 4 durable worker package is merged.
+  # Durable workflow worker; execution side effects remain in the guarded execution service.
   worker:
     profiles: ["mcp"]
     image: civitas:local
-    environment: *civitas-environment
-    command: ["python", "scripts/run_worker.py"]
+    command: ["civitas-worker"]
+    environment:
+      <<: *civitas-environment
+      CIVITAS_WORKER_FACTORY: civitas.runtime:create_worker
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -69,8 +75,10 @@ services:
   mcp-server:
     profiles: ["mcp"]
     image: civitas:local
-    environment: *civitas-environment
-    command: ["python", "scripts/run_mcp_server.py"]
+    environment:
+      <<: *civitas-environment
+      CIVITAS_MCP_HOST: 0.0.0.0
+    command: ["civitas-mcp"]
     ports:
       - "${CIVITAS_MCP_PORT:-8001}:8001"
     depends_on:

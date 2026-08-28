@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -463,6 +464,49 @@ class WorkflowEventModel(Base):
     causation_id: Mapped[str | None] = mapped_column(String(128))
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class WorkflowCheckpointModel(TimestampMixin, Base):
+    """Durable queue state for one resumable planning workflow."""
+
+    __tablename__ = "workflow_checkpoints"
+    __table_args__ = (
+        CheckConstraint("cycle >= 1", name="ck_workflow_checkpoints_cycle"),
+        CheckConstraint("event_sequence >= 0", name="ck_workflow_checkpoints_event_sequence"),
+        CheckConstraint("attempt_count >= 0", name="ck_workflow_checkpoints_attempt_count"),
+        CheckConstraint(
+            "(lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL) OR "
+            "(lease_owner IS NOT NULL AND lease_token IS NOT NULL AND "
+            "lease_expires_at IS NOT NULL)",
+            name="ck_workflow_checkpoints_lease_complete",
+        ),
+        Index(
+            "ix_workflow_checkpoints_queue",
+            "completed",
+            "available_at",
+            "lease_expires_at",
+        ),
+    )
+    planning_run_id: Mapped[str] = mapped_column(
+        ForeignKey("planning_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    checkpoint: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    workflow_limits: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    procurement_goal: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    policy_version: Mapped[str | None] = mapped_column(String(64))
+    phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    cycle: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_token: Mapped[str | None] = mapped_column(String(128), unique=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class ExecutionAuditModel(TimestampMixin, Base):
