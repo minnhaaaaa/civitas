@@ -169,4 +169,15 @@ It must not create an alternative execution path. Any approval initiated from th
 
 ## Delivery status
 
-The current repository implements the core workflow, demonstration API, guarded API services, SSE events, and optional viewer. It does not yet expose the inbound MCP tool surface above. Until that facade, authentication composition, and durable production worker are implemented, documentation and demos must describe Codex/MCP as the approved target interface rather than a completed deployment feature.
+The current repository implements the versioned MCP product contracts, inbound
+MCP adapter, transport-neutral procurement facade, core workflow, demonstration
+API, guarded execution services, SSE events, and optional audit viewer. The
+inbound adapter exposes the tool surface above and is covered by deterministic
+transport-to-facade integration tests.
+
+It is not yet a deployable live procurement service. The remaining work is a
+production composition root that supplies authenticated identity, PostgreSQL
+workflow persistence, a durable worker, approved outbound provider adapters,
+and real execution credentials. Until that composition is delivered,
+documentation and demonstrations must present Codex/MCP as a tested interface
+with deterministic fakes—not as a live provider-connected deployment.
