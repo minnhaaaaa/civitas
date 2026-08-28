@@ -5,8 +5,29 @@ from datetime import UTC
 
 import pytest
 
+from civitas.application.live_execution import PersistedApprovedExecutionAdapter
+from civitas.contracts.tools import MCPToolCall, MCPToolResult
+from civitas.integrations import ExecutionProviderContext
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
-from civitas.runtime import RuntimeSettings, SettingsError, build_runtime, build_worker
+from civitas.runtime import (
+    ProviderExecutionRuntime,
+    RuntimeSettings,
+    SettingsError,
+    build_runtime,
+    build_worker,
+)
+
+
+class UnusedProviderReads:
+    async def invoke(self, call: MCPToolCall) -> MCPToolResult:
+        del call
+        raise AssertionError("composition must not call providers")
+
+
+class UnusedExecutionConnections:
+    async def connect(self, context: ExecutionProviderContext) -> UnusedProviderReads:
+        del context
+        raise AssertionError("composition must not connect providers")
 
 
 def _settings() -> RuntimeSettings:
@@ -82,3 +103,28 @@ async def test_unconfigured_provider_execution_fails_closed() -> None:
         assert "not configured" in str(result["message"])
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_complete_provider_dependencies_enable_persisted_guarded_execution() -> None:
+    runtime = build_runtime(
+        _settings(),
+        provider_execution=ProviderExecutionRuntime(
+            reads=UnusedProviderReads(),
+            connections=UnusedExecutionConnections(),
+            server_name="provider-1",
+        ),
+    )
+    try:
+        assert isinstance(runtime.executions, PersistedApprovedExecutionAdapter)
+    finally:
+        await runtime.close()
+
+
+def test_provider_runtime_rejects_empty_server_identity() -> None:
+    with pytest.raises(ValueError, match="server name"):
+        ProviderExecutionRuntime(
+            reads=UnusedProviderReads(),
+            connections=UnusedExecutionConnections(),
+            server_name=" ",
+        )

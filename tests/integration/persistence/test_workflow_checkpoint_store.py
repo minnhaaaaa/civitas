@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -8,17 +9,23 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from tests.unit.workflow.test_parliament_workflow import _request
 
-from civitas.contracts.enums import WorkflowEventType
+from civitas.contracts.enums import FeasibilityStatus, JuryState, WorkflowEventType
+from civitas.contracts.jury import IntegrityComponents, JuryEvaluation, JuryGateResult
+from civitas.contracts.optimization import CandidatePlan, OptimizationResult
 from civitas.contracts.workflow import WorkflowEvent
 from civitas.persistence.models import (
+    CandidatePlanModel,
+    DistributionLineModel,
+    JuryDecisionModel,
     OrganizationModel,
     PlanningRunModel,
+    ProcurementLineModel,
     WorkflowCheckpointModel,
     WorkflowEventModel,
 )
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.workflow.checkpointing import CheckpointConflictError
-from civitas.workflow.models import WorkflowCheckpoint, WorkflowPhase
+from civitas.workflow.models import ParliamentSession, WorkflowCheckpoint, WorkflowPhase
 
 
 async def _seed_run(database: object) -> tuple[str, str]:
@@ -51,6 +58,21 @@ async def planning_run(database: object) -> AsyncIterator[str]:
     finally:
         sessions = database.sessions  # type: ignore[attr-defined]
         async with sessions() as session, session.begin():
+            plan_ids = select(CandidatePlanModel.id).where(
+                CandidatePlanModel.planning_run_id == run_id
+            )
+            await session.execute(
+                delete(JuryDecisionModel).where(JuryDecisionModel.planning_run_id == run_id)
+            )
+            await session.execute(
+                delete(ProcurementLineModel).where(ProcurementLineModel.plan_id.in_(plan_ids))
+            )
+            await session.execute(
+                delete(DistributionLineModel).where(DistributionLineModel.plan_id.in_(plan_ids))
+            )
+            await session.execute(
+                delete(CandidatePlanModel).where(CandidatePlanModel.planning_run_id == run_id)
+            )
             await session.execute(
                 delete(WorkflowEventModel).where(WorkflowEventModel.planning_run_id == run_id)
             )
@@ -218,3 +240,74 @@ async def test_postgresql_rejects_non_monotonic_progress_events(
             events=(skipped,),
             now=now + timedelta(seconds=1),
         )
+
+
+@pytest.mark.asyncio
+async def test_approved_checkpoint_projects_selected_plan_and_jury_for_execution(
+    database: object, planning_run: str
+) -> None:
+    store = PostgreSQLWorkflowCheckpointStore(database.sessions)  # type: ignore[attr-defined]
+    initial = _checkpoint(planning_run)
+    await store.enqueue(initial)
+    now = datetime.now(UTC) + timedelta(seconds=1)
+    lease = await store.claim(worker_id="worker-a", now=now, lease_for=timedelta(minutes=1))
+    assert lease is not None
+    plan_id = f"plan-{uuid4().hex}"
+    plan = CandidatePlan(
+        plan_id=plan_id,
+        planning_run_id=planning_run,
+        feasibility=FeasibilityStatus.FULLY_FEASIBLE,
+        shortage_base_units=0,
+        metrics={"total_landed_cost": Decimal("0")},
+        solver_version="solver-test-v1",
+    )
+    jury_id = f"jury-{uuid4().hex}"
+    approved = initial.model_copy(
+        update={
+            "phase": WorkflowPhase.APPROVE,
+            "optimization_result": OptimizationResult(
+                planning_run_id=planning_run,
+                alternatives=(plan,),
+            ),
+            "parliament": ParliamentSession(selected_plan_id=plan_id),
+            "jury_evaluation": JuryEvaluation(
+                evaluation_id=jury_id,
+                planning_run_id=planning_run,
+                plan_id=plan_id,
+                policy_version="decision-integrity-v1",
+                implementation_version="test-v1",
+                calculated_at=now,
+                components=IntegrityComponents(
+                    critical_claim_coverage=100,
+                    evidence_independence=100,
+                    provenance_completeness=100,
+                    evidence_freshness=100,
+                    canonical_source_diversity=100,
+                    contradiction_resolution=100,
+                    dissent_robustness=100,
+                ),
+                integrity_score=100,
+                gates=(JuryGateResult(gate_code="solver_feasibility", passed=True),),
+                state=JuryState.APPROVE,
+                reason_codes=(),
+            ),
+            "final_state": JuryState.APPROVE.value,
+            "completed": True,
+        }
+    )
+
+    await store.commit_transition(
+        lease=lease,
+        checkpoint=approved,
+        events=(),
+        now=now + timedelta(seconds=1),
+    )
+
+    sessions = database.sessions  # type: ignore[attr-defined]
+    async with sessions() as session:
+        plan_row = await session.get(CandidatePlanModel, plan_id)
+        jury_row = await session.get(JuryDecisionModel, jury_id)
+        run_row = await session.get(PlanningRunModel, planning_run)
+    assert plan_row is not None and plan_row.selected is True
+    assert jury_row is not None and jury_row.plan_id == plan_id
+    assert run_row is not None and run_row.status == "ready_for_approval"

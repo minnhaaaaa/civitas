@@ -21,6 +21,7 @@ from civitas.contracts.enums import ExecutionState, FeasibilityStatus, JuryState
 from civitas.contracts.evidence import EvidenceRecord
 from civitas.contracts.execution import ExecutionRequest, ExecutionResult
 from civitas.contracts.jury import JuryRequest
+from civitas.contracts.mcp_product import PlanningRunStatus
 from civitas.contracts.optimization import CandidatePlan, DistributionLine, ProcurementLine
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall, MCPToolResult
 from civitas.evidence.dissent import DissentInvestigationPlan, DissentProtocol
@@ -371,7 +372,7 @@ class GuardedExecutionService:
                     decision="duplicate",
                 )
 
-            if planning_run.status != JuryState.APPROVE.value:
+            if planning_run.status != PlanningRunStatus.READY_FOR_APPROVAL.value:
                 raise ValueError("planning run is not approved")
             if context is not None and context.organization_id != planning_run.organization_id:
                 raise ValueError("planning run not found")

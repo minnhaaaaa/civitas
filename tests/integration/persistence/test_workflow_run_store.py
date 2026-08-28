@@ -21,9 +21,13 @@ from civitas.contracts.mcp_product import (
     ProcurementGoal,
 )
 from civitas.persistence.models import (
+    CandidatePlanModel,
+    DistributionLineModel,
+    JuryDecisionModel,
     OrganizationModel,
     PlanningBucketModel,
     PlanningRunModel,
+    ProcurementLineModel,
     SKUModel,
     WarehouseModel,
     WorkflowCheckpointModel,
@@ -81,6 +85,23 @@ async def provisioned_scope(database: object) -> AsyncIterator[tuple[str, str, s
                 )
             )
             if run_ids:
+                plan_ids = select(CandidatePlanModel.id).where(
+                    CandidatePlanModel.planning_run_id.in_(run_ids)
+                )
+                await session.execute(
+                    delete(JuryDecisionModel).where(JuryDecisionModel.planning_run_id.in_(run_ids))
+                )
+                await session.execute(
+                    delete(ProcurementLineModel).where(ProcurementLineModel.plan_id.in_(plan_ids))
+                )
+                await session.execute(
+                    delete(DistributionLineModel).where(DistributionLineModel.plan_id.in_(plan_ids))
+                )
+                await session.execute(
+                    delete(CandidatePlanModel).where(
+                        CandidatePlanModel.planning_run_id.in_(run_ids)
+                    )
+                )
                 await session.execute(
                     delete(WorkflowEventModel).where(
                         WorkflowEventModel.planning_run_id.in_(run_ids)
@@ -141,9 +162,28 @@ async def test_facade_store_persists_tenant_run_limits_buckets_and_progress(
     now = datetime(2026, 8, 28, tzinfo=UTC)
     clock = FakeClock(now)
     ids = UUIDGenerator()
+    optimization_result = _result(run_id)
+    optimization_result = optimization_result.model_copy(
+        update={
+            "alternatives": tuple(
+                plan.model_copy(update={"plan_id": f"{run_id}-{plan.plan_id}"})
+                for plan in optimization_result.alternatives
+            )
+        }
+    )
     workflow = ParliamentWorkflow(
-        optimizer=FakeOptimizer([_result(run_id)]),
-        jury=FakeJury([_evaluation("approve").model_copy(update={"planning_run_id": run_id})]),
+        optimizer=FakeOptimizer([optimization_result]),
+        jury=FakeJury(
+            [
+                _evaluation("approve").model_copy(
+                    update={
+                        "evaluation_id": f"{run_id}-eval-approve",
+                        "planning_run_id": run_id,
+                        "plan_id": f"{run_id}-plan-b",
+                    }
+                )
+            ]
+        ),
         ids=ids,
         clock=clock,
     )

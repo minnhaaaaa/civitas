@@ -6,19 +6,25 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from civitas.application.live_execution import (
+    ExecutionProviderConnectionFactory,
+    PersistedApprovalAdapter,
+    PersistedApprovedExecutionAdapter,
+)
 from civitas.application.procurement_facade import (
     ApprovedExecutionPort,
     ProcurementApplicationFacade,
     WorkflowRunStore,
 )
 from civitas.approval.service import ApprovalService
+from civitas.execution.guarded import GuardedExecutionService
 from civitas.mcp_server import InboundMCPServer
 from civitas.optimization.adapter import OrToolsOptimizer
 from civitas.persistence.database import Database
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
+from civitas.ports.mcp import MCPPort
 from civitas.runtime.adapters import (
-    ApprovalFacadeAdapter,
     ControlledBearerIdentity,
     DisabledExecutionPort,
     FailClosedJuryPort,
@@ -30,6 +36,19 @@ from civitas.worker import DurableWorkflowWorker
 from civitas.workflow.orchestrator import ParliamentWorkflow
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderExecutionRuntime:
+    """Agent 3 dependencies required to enable Agent 4 provider writes."""
+
+    reads: MCPPort
+    connections: ExecutionProviderConnectionFactory
+    server_name: str
+
+    def __post_init__(self) -> None:
+        if not self.server_name.strip():
+            raise ValueError("provider server name is required")
+
+
 @dataclass(slots=True)
 class RuntimeApplication:
     settings: RuntimeSettings
@@ -37,6 +56,7 @@ class RuntimeApplication:
     workflow: ParliamentWorkflow
     checkpoints: PostgreSQLWorkflowCheckpointStore
     workflow_runs: WorkflowRunStore
+    executions: ApprovedExecutionPort
     facade: ProcurementApplicationFacade
     identity: ControlledBearerIdentity
     mcp_server: InboundMCPServer
@@ -56,8 +76,13 @@ def build_runtime(
     *,
     workflow_runs: WorkflowRunStore | None = None,
     executions: ApprovedExecutionPort | None = None,
+    provider_execution: ProviderExecutionRuntime | None = None,
 ) -> RuntimeApplication:
-    """Build all current concrete services, with narrow seams for Agents 2 and 4."""
+    """Build the live service, enabling writes only with the complete provider boundary."""
+    if executions is not None and provider_execution is not None:
+        raise ValueError(
+            "provide an execution override or provider execution dependencies, not both"
+        )
     database = Database(settings.database_url)
     clock = SystemClock()
     ids = UUIDGenerator()
@@ -78,10 +103,31 @@ def build_runtime(
         clock=clock,
         secret_pepper=settings.approval_secret_pepper.encode("utf-8"),
     )
+    execution_port: ApprovedExecutionPort
+    if executions is not None:
+        execution_port = executions
+    elif provider_execution is not None:
+        guarded = GuardedExecutionService(
+            sessions=database.sessions,
+            mcp=provider_execution.reads,
+            ids=ids,
+            clock=clock,
+            approvals=approval_service,
+            server_name=provider_execution.server_name,
+        )
+        execution_port = PersistedApprovedExecutionAdapter(
+            sessions=database.sessions,
+            guarded=guarded,
+            execution_connections=provider_execution.connections,
+            ids=ids,
+            clock=clock,
+        )
+    else:
+        execution_port = DisabledExecutionPort()
     facade = ProcurementApplicationFacade(
         workflow_runs=run_store,
-        approvals=ApprovalFacadeAdapter(approval_service),
-        executions=executions or DisabledExecutionPort(),
+        approvals=PersistedApprovalAdapter(approval_service),
+        executions=execution_port,
         ids=ids,
         clock=clock,
         policy_version=settings.policy_version,
@@ -101,6 +147,7 @@ def build_runtime(
         workflow=workflow,
         checkpoints=checkpoints,
         workflow_runs=run_store,
+        executions=execution_port,
         facade=facade,
         identity=identity,
         mcp_server=server,

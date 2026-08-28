@@ -1,7 +1,7 @@
 """bind approvals and add immutable execution/provider ledgers
 
 Revision ID: 2c6d0a76f945
-Revises: 8e4c1d9a2b70
+Revises: f7b2c4d6e801
 Create Date: 2026-08-28
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "2c6d0a76f945"
-down_revision: str | None = "8e4c1d9a2b70"
+down_revision: str | None = "f7b2c4d6e801"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

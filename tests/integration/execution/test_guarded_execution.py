@@ -199,7 +199,7 @@ async def seed_execution_state(
                 bucket_duration=timedelta(days=1),
                 timezone="UTC",
                 input_data_version="inputs-v1",
-                status="approve",
+                status="ready_for_approval",
             )
         )
         await session.flush()

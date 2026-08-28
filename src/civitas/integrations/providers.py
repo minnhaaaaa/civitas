@@ -166,7 +166,7 @@ class ResilientProviderTransport:
         ) from last_error
 
 
-class ProviderEvidenceClient:
+class ProviderEvidenceClient(MCPPort):
     """Read-only adapter that turns provider data into typed, lineage-ready evidence."""
 
     def __init__(
@@ -186,14 +186,7 @@ class ProviderEvidenceClient:
         claim_ids: Sequence[str] = (),
         agent_id: str | None = None,
     ) -> ProviderEvidenceRead:
-        if call.access_mode is not MCPAccessMode.READ:
-            raise MCPAccessError("evidence retrieval is read-only")
-        capability = next(
-            (item for item in self.manifest.tools if item.name == call.tool_name), None
-        )
-        if capability is None or capability.access_mode is not MCPAccessMode.READ:
-            raise MCPAccessError(f"provider did not advertise read capability {call.tool_name}")
-        result = await self._client.invoke(call)
+        result = await self.invoke(call)
         source_group = self.manifest.canonical_source_groups.get(call.tool_name)
         evidence = evidence_from_tool_result(
             evidence_id=evidence_id,
@@ -212,6 +205,17 @@ class ProviderEvidenceClient:
             evidence=evidence,
             observations=_parse_observations(call.tool_name, result),
         )
+
+    async def invoke(self, call: MCPToolCall) -> MCPToolResult:
+        """Expose the same advertised read boundary to execution refreshers."""
+        if call.access_mode is not MCPAccessMode.READ:
+            raise MCPAccessError("evidence retrieval is read-only")
+        capability = next(
+            (item for item in self.manifest.tools if item.name == call.tool_name), None
+        )
+        if capability is None or capability.access_mode is not MCPAccessMode.READ:
+            raise MCPAccessError(f"provider did not advertise read capability {call.tool_name}")
+        return await self._client.invoke(call)
 
 
 @dataclass(frozen=True, slots=True)

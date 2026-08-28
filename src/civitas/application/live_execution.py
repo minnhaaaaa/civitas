@@ -7,7 +7,12 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from civitas.approval.service import ApprovalService
+from civitas.approval.service import (
+    ApprovalError,
+    ApprovalService,
+    ChangedPlanError,
+    ExpiredApprovalError,
+)
 from civitas.contracts.enums import ExecutionState
 from civitas.contracts.execution import ExecutionRequest
 from civitas.contracts.mcp_product import (
@@ -19,6 +24,9 @@ from civitas.contracts.mcp_product import (
     ExecuteApprovedPlanRequest,
     ExecutionAuditEntry,
     ExecutionReceipt,
+    ProductError,
+    ProductErrorCode,
+    ProductServiceError,
 )
 from civitas.contracts.providers import ProviderRegistration
 from civitas.execution.guarded import GuardedExecutionService
@@ -94,11 +102,18 @@ class PersistedApprovalAdapter:
     async def approve(
         self, *, context: OperatorContext, request: ApproveExecutionRequest
     ) -> ApprovalReceipt:
-        return await self._service.approve(
-            context=context,
-            challenge_id=request.challenge_id,
-            secret=request.challenge_secret,
-        )
+        try:
+            return await self._service.approve(
+                context=context,
+                challenge_id=request.challenge_id,
+                secret=request.challenge_secret,
+            )
+        except ExpiredApprovalError as error:
+            raise _product_error(ProductErrorCode.EXPIRED_APPROVAL, str(error)) from error
+        except ChangedPlanError as error:
+            raise _product_error(ProductErrorCode.CONFLICT, str(error)) from error
+        except ApprovalError as error:
+            raise _product_error(ProductErrorCode.REJECTED_EXECUTION, str(error)) from error
 
 
 class PersistedApprovedExecutionAdapter:
@@ -295,4 +310,17 @@ def _execution_receipt_from_audit(
             if state in {ExecutionState.COMPENSATION_REQUIRED, ExecutionState.COMPENSATED}
             else None
         ),
+    )
+
+
+def _product_error(code: ProductErrorCode, message: str) -> ProductServiceError:
+    from datetime import UTC, datetime
+
+    return ProductServiceError(
+        ProductError(
+            code=code,
+            message=message,
+            retryable=False,
+            occurred_at=datetime.now(UTC),
+        )
     )

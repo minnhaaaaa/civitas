@@ -257,6 +257,7 @@ def _run_response(
     after = _decode_cursor(PageRequest(cursor=cursor, page_size=page_size))
     events = tuple(event for event in snapshot.events if event.sequence > after)
     page = events[:page_size]
+    selected = _selected_plan(snapshot.checkpoint)
     return PlanningRunResponse(
         run=PlanningRun(
             organization_id=snapshot.organization_id,
@@ -265,9 +266,7 @@ def _run_response(
             policy_version=snapshot.policy_version,
             created_at=snapshot.created_at,
             updated_at=snapshot.updated_at,
-            selected_plan_hash=selected_plan_hash(_selected_plan(snapshot.checkpoint))
-            if _selected_plan(snapshot.checkpoint)
-            else None,
+            selected_plan_hash=selected_plan_hash(selected) if selected is not None else None,
             outstanding_investigation=snapshot.checkpoint.investigation_backlog,
         ),
         progress=page,

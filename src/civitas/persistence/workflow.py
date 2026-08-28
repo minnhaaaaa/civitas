@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
@@ -14,7 +15,11 @@ from civitas.contracts.enums import WorkflowEventType
 from civitas.contracts.mcp_product import PlanningRunStatus
 from civitas.contracts.workflow import WorkflowEvent
 from civitas.persistence.models import (
+    CandidatePlanModel,
+    DistributionLineModel,
+    JuryDecisionModel,
     PlanningRunModel,
+    ProcurementLineModel,
     WorkflowCheckpointModel,
     WorkflowEventModel,
 )
@@ -179,6 +184,7 @@ class PostgreSQLWorkflowCheckpointStore:
                     )
                 )
             row.checkpoint = snapshot
+            await _project_execution_state(session, checkpoint)
             row.phase = checkpoint.phase.value
             row.cycle = checkpoint.cycle
             row.event_sequence = checkpoint.event_sequence
@@ -352,3 +358,100 @@ def _planning_run_status(checkpoint: WorkflowCheckpoint) -> str:
     if checkpoint.phase is WorkflowPhase.INVESTIGATION:
         return PlanningRunStatus.INVESTIGATING.value
     return PlanningRunStatus.PLANNING.value
+
+
+async def _project_execution_state(session: AsyncSession, checkpoint: WorkflowCheckpoint) -> None:
+    """Project immutable solver and Jury output required by guarded execution."""
+    optimization = checkpoint.optimization_result
+    if optimization is None:
+        return
+    selected_plan_id = (
+        checkpoint.parliament.selected_plan_id if checkpoint.parliament is not None else None
+    )
+    await session.execute(
+        update(CandidatePlanModel)
+        .where(CandidatePlanModel.planning_run_id == checkpoint.planning_run_id)
+        .values(selected=False)
+    )
+    for plan in optimization.alternatives:
+        row = await session.get(CandidatePlanModel, plan.plan_id)
+        if row is None:
+            row = CandidatePlanModel(
+                id=plan.plan_id,
+                planning_run_id=checkpoint.planning_run_id,
+                stable_key=plan.plan_id,
+                feasibility=plan.feasibility.value,
+                shortage_base_units=plan.shortage_base_units,
+                metrics=plan.model_dump(mode="json")["metrics"],
+                solver_version=plan.solver_version,
+                selected=plan.plan_id == selected_plan_id,
+            )
+            session.add(row)
+            await session.flush()
+            for index, procurement_line in enumerate(plan.procurement):
+                session.add(
+                    ProcurementLineModel(
+                        id=_projection_id("procurement", plan.plan_id, index),
+                        plan_id=plan.plan_id,
+                        supplier_id=procurement_line.supplier_id,
+                        sku_id=procurement_line.sku_id,
+                        destination_warehouse_id=procurement_line.destination_warehouse_id,
+                        arrival_bucket_start=procurement_line.arrival_bucket_start,
+                        quantity=procurement_line.quantity.value,
+                        unit_of_measure=procurement_line.quantity.unit,
+                        landed_cost=procurement_line.landed_cost,
+                    )
+                )
+            for index, distribution_line in enumerate(plan.distribution):
+                session.add(
+                    DistributionLineModel(
+                        id=_projection_id("distribution", plan.plan_id, index),
+                        plan_id=plan.plan_id,
+                        sku_id=distribution_line.sku_id,
+                        source_warehouse_id=distribution_line.source_warehouse_id,
+                        destination_warehouse_id=distribution_line.destination_warehouse_id,
+                        departure_bucket_start=distribution_line.departure_bucket_start,
+                        arrival_bucket_start=distribution_line.arrival_bucket_start,
+                        quantity=distribution_line.quantity.value,
+                        unit_of_measure=distribution_line.quantity.unit,
+                        source_lot_ids=list(distribution_line.source_lot_ids),
+                    )
+                )
+        else:
+            if row.planning_run_id != checkpoint.planning_run_id:
+                raise CheckpointConflictError("solver plan ID is already used by another run")
+            row.selected = plan.plan_id == selected_plan_id
+
+    jury = checkpoint.jury_evaluation
+    if jury is None:
+        return
+    if jury.plan_id != selected_plan_id:
+        raise CheckpointConflictError("Jury decision does not match the selected solver plan")
+    existing = await session.get(JuryDecisionModel, jury.evaluation_id)
+    if existing is None:
+        session.add(
+            JuryDecisionModel(
+                id=jury.evaluation_id,
+                planning_run_id=checkpoint.planning_run_id,
+                plan_id=jury.plan_id,
+                policy_version=jury.policy_version,
+                implementation_version=jury.implementation_version,
+                calculated_at=jury.calculated_at,
+                component_scores=jury.components.model_dump(mode="json"),
+                integrity_score=jury.integrity_score,
+                gate_results=[gate.model_dump(mode="json") for gate in jury.gates],
+                final_state=jury.state.value,
+                reason_codes=list(jury.reason_codes),
+                per_claim_contributions={},
+            )
+        )
+    elif (
+        existing.planning_run_id != checkpoint.planning_run_id
+        or existing.plan_id != jury.plan_id
+        or existing.policy_version != jury.policy_version
+    ):
+        raise CheckpointConflictError("Jury evaluation ID is already used by another decision")
+
+
+def _projection_id(kind: str, plan_id: str, index: int) -> str:
+    return hashlib.sha256(f"{kind}:{plan_id}:{index}".encode()).hexdigest()
