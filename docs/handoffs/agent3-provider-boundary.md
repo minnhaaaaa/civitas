@@ -30,8 +30,10 @@ Branch: `live/provider-boundary`
 - Inject `connections.evidence` into planning/investigation reads,
   `connections.dissent` into clean-room Dissent, and
   `connections.execution` only into the guarded execution service.
-- Agent 4 should bind `ExecutionProviderContext` to its persisted receipt and
-  selected plan hash when composing the execution client. This branch does not
-  create a second approval or execution path.
+- Agent 4 binding is integrated on `live/approval-execution`: its product
+  adapter derives `ExecutionProviderContext` from the persisted receipt and
+  exact selected-plan hash, while `ContextBoundExecutionMCPClient` injects
+  protected binding metadata into every write. This does not create a second
+  approval or execution path.
 - The mock provider remains deterministic and offline; its advertised manifest
   is the provider contract fixture for CI.

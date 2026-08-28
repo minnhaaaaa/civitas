@@ -8,13 +8,13 @@ composition testable with deterministic in-memory fakes.
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
+from civitas.application.plan_identity import selected_plan_hash
 from civitas.contracts.mcp_product import (
     ApprovalChallenge,
     ApprovalReceipt,
@@ -265,7 +265,7 @@ def _run_response(
             policy_version=snapshot.policy_version,
             created_at=snapshot.created_at,
             updated_at=snapshot.updated_at,
-            selected_plan_hash=_plan_hash(_selected_plan(snapshot.checkpoint))
+            selected_plan_hash=selected_plan_hash(_selected_plan(snapshot.checkpoint))
             if _selected_plan(snapshot.checkpoint)
             else None,
             outstanding_investigation=snapshot.checkpoint.investigation_backlog,
@@ -289,7 +289,7 @@ def _decision_summary(
         policy_version=snapshot.policy_version,
         generated_at=snapshot.updated_at,
         selected_plan_id=plan.plan_id if plan else None,
-        selected_plan_hash=_plan_hash(plan) if plan else None,
+        selected_plan_hash=selected_plan_hash(plan) if plan else None,
         business_impact=impact,
         integrity=(
             IntegritySummary(
@@ -344,13 +344,6 @@ def _business_impact(plan: CandidatePlan) -> BusinessImpact:
         procurement_line_count=len(plan.procurement),
         distribution_line_count=len(plan.distribution),
     )
-
-
-def _plan_hash(plan: CandidatePlan | None) -> str | None:
-    if plan is None:
-        return None
-    payload = json.dumps(plan.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _decode_cursor(request: PageRequest) -> int:

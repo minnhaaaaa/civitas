@@ -521,6 +521,9 @@ class ExecutionAuditModel(TimestampMixin, Base):
     planning_run_id: Mapped[str] = mapped_column(ForeignKey("planning_runs.id"), nullable=False)
     approved_plan_id: Mapped[str] = mapped_column(ForeignKey("candidate_plans.id"), nullable=False)
     jury_decision_id: Mapped[str] = mapped_column(ForeignKey("jury_decisions.id"), nullable=False)
+    approval_receipt_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approval_receipts.id", ondelete="RESTRICT")
+    )
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     approval_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     action: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -531,6 +534,57 @@ class ExecutionAuditModel(TimestampMixin, Base):
     failure_code: Mapped[str | None] = mapped_column(String(128))
     compensation_status: Mapped[str | None] = mapped_column(String(32))
     external_references: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class ExecutionAuditEventModel(Base):
+    """Append-only state transition history for an execution attempt."""
+
+    __tablename__ = "execution_audit_events"
+    __table_args__ = (
+        UniqueConstraint("execution_id", "sequence", name="uq_execution_events_sequence"),
+        CheckConstraint("sequence > 0", name="ck_execution_events_sequence_positive"),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("execution_audits.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(128))
+    detail: Mapped[str | None] = mapped_column(String(500))
+
+
+class ProviderWriteModel(Base):
+    """Durable ledger for each idempotent outbound provider write."""
+
+    __tablename__ = "provider_writes"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "idempotency_key", name="uq_provider_writes_idempotency"
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'succeeded', 'failed', 'compensation_required', 'compensated')",
+            name="ck_provider_writes_state",
+        ),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("execution_audits.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    supplier_id: Mapped[str] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    external_reference: Mapped[str | None] = mapped_column(String(255))
+    failure_code: Mapped[str | None] = mapped_column(String(128))
 
 
 class ApprovalChallengeModel(Base):

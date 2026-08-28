@@ -72,6 +72,16 @@ def onboarder(
     return ProviderOnboarder(credentials=resolver, transports=factory), factory
 
 
+class CapturingServer(MockProcurementMCPServer):
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.calls: list[MCPToolCall] = []
+
+    async def invoke(self, call: MCPToolCall) -> MCPToolResult:
+        self.calls.append(call)
+        return await super().invoke(call)
+
+
 def read_call(tool: str) -> MCPToolCall:
     return MCPToolCall(
         call_id=f"call-{tool}",
@@ -120,7 +130,7 @@ async def test_onboarding_discovers_and_validates_simulator_contract() -> None:
 
 @pytest.mark.asyncio
 async def test_connections_isolate_credentials_and_dissent_is_read_only() -> None:
-    server = MockProcurementMCPServer(
+    server = CapturingServer(
         inventory=[
             {
                 "lot_id": "lot-1",
@@ -160,6 +170,19 @@ async def test_connections_isolate_credentials_and_dissent_is_read_only() -> Non
 
     result = await connections.execution.invoke(write_call())
     assert result.payload["status"] == "created"
+    provider_write = next(call for call in reversed(server.calls) if call.access_mode == "write")
+    assert provider_write.arguments["_civitas_execution"] == {
+        "execution_id": "execution-1",
+        "approval_receipt_id": "receipt-1",
+        "selected_plan_hash": "a" * 64,
+    }
+
+    with pytest.raises(MCPAccessError, match="owned by Civitas"):
+        await connections.execution.invoke(
+            write_call().model_copy(
+                update={"arguments": {"_civitas_execution": {"approval_receipt_id": "spoof"}}}
+            )
+        )
 
 
 @pytest.mark.asyncio

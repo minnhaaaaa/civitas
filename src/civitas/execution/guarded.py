@@ -6,13 +6,15 @@ import asyncio
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from civitas.application.plan_identity import approved_totals, selected_plan_hash
+from civitas.approval.service import ApprovalService
 from civitas.contracts.claims import ClaimScope, TypedClaim
 from civitas.contracts.common import Contract, Quantity
 from civitas.contracts.enums import ExecutionState, FeasibilityStatus, JuryState
@@ -32,16 +34,19 @@ from civitas.persistence.inventory import (
 from civitas.persistence.models import (
     CandidatePlanModel,
     DistributionLineModel,
+    ExecutionAuditEventModel,
     ExecutionAuditModel,
     InventoryLotModel,
     JuryDecisionModel,
     PlanningRunModel,
     ProcurementLineModel,
+    ProviderWriteModel,
     SKUModel,
     SupplierModel,
     WarehouseModel,
 )
 from civitas.ports.clock import Clock
+from civitas.ports.identity import OperatorContext
 from civitas.ports.ids import IDGenerator
 from civitas.ports.mcp import MCPPort
 
@@ -297,6 +302,7 @@ class GuardedExecutionService:
         refresher: RefreshInputsPort | None = None,
         server_name: str = "mock-procurement",
         integrity_policy: IntegrityPolicyV1 | None = None,
+        approvals: ApprovalService | None = None,
     ) -> None:
         self._sessions = sessions
         self._mcp = mcp
@@ -309,8 +315,20 @@ class GuardedExecutionService:
             server_name=server_name,
         )
         self._jury = JuryEvaluator(integrity_policy)
+        self._approvals = approvals
 
-    async def execute(self, request: ExecutionRequest) -> GuardedExecutionOutcome:
+    async def execute(
+        self,
+        request: ExecutionRequest,
+        *,
+        context: OperatorContext | None = None,
+        approval_receipt_id: str | None = None,
+        write_mcp: MCPPort | None = None,
+    ) -> GuardedExecutionOutcome:
+        if (context is None) != (approval_receipt_id is None):
+            raise ValueError("context and approval receipt must be provided together")
+        if self._approvals is not None and (context is None or approval_receipt_id is None):
+            raise ValueError("persisted approval receipt is required for execution")
         async with self._sessions() as session, session.begin():
             planning_run = await session.get(PlanningRunModel, request.planning_run_id)
             if planning_run is None:
@@ -337,6 +355,7 @@ class GuardedExecutionService:
                     or duplicate.jury_decision_id != request.jury_evaluation_id
                     or duplicate.approval_policy_version != request.approval_policy_version
                     or duplicate.action != request.action
+                    or duplicate.approval_receipt_id != approval_receipt_id
                 ):
                     raise ValueError("idempotency key was reused for a different execution request")
                 return GuardedExecutionOutcome(
@@ -354,6 +373,8 @@ class GuardedExecutionService:
 
             if planning_run.status != JuryState.APPROVE.value:
                 raise ValueError("planning run is not approved")
+            if context is not None and context.organization_id != planning_run.organization_id:
+                raise ValueError("planning run not found")
             if request.approval_policy_version != "approval-v1":
                 raise ValueError("unsupported approval policy version")
             plan_row = await session.get(CandidatePlanModel, request.approved_plan_id)
@@ -410,12 +431,42 @@ class GuardedExecutionService:
                     reasons=("jury_not_approved",),
                 )
 
+            if self._approvals is not None:
+                assert context is not None and approval_receipt_id is not None
+                await self._approvals.consume_for_execution_in_session(
+                    session,
+                    context=context,
+                    receipt_id=approval_receipt_id,
+                    idempotency_key=request.idempotency_key,
+                    run_id=planning_run.id,
+                    selected_plan_hash=selected_plan_hash(plan),
+                    policy_version=request.approval_policy_version,
+                    actual_totals=approved_totals(plan),
+                )
+                if write_mcp is None:
+                    raise ValueError("approval-bound execution provider connection is required")
+
+            if write_mcp is not None:
+                _ensure_execution_connection_binding(
+                    write_mcp,
+                    execution_id=request.execution_id,
+                    approval_receipt_id=approval_receipt_id,
+                    selected_hash=selected_plan_hash(plan),
+                )
+
+            await _lock_execution_capacity(
+                session,
+                organization_id=planning_run.organization_id,
+                plan=plan,
+            )
+
             audit = ExecutionAuditModel(
                 id=request.execution_id,
                 organization_id=planning_run.organization_id,
                 planning_run_id=request.planning_run_id,
                 approved_plan_id=request.approved_plan_id,
                 jury_decision_id=request.jury_evaluation_id,
+                approval_receipt_id=approval_receipt_id,
                 idempotency_key=request.idempotency_key,
                 approval_policy_version=request.approval_policy_version,
                 action=request.action,
@@ -428,6 +479,16 @@ class GuardedExecutionService:
                 external_references=[],
             )
             session.add(audit)
+            await session.flush()
+            _record_event(
+                session,
+                ids=self._ids,
+                execution_id=audit.id,
+                sequence=1,
+                occurred_at=audit.attempted_at or request.requested_at,
+                state=ExecutionState.PENDING,
+                detail="approval bound; freshness revalidation started",
+            )
 
             refresh = await self._refresher.refresh(
                 request=request,
@@ -439,6 +500,16 @@ class GuardedExecutionService:
                 audit.state = ExecutionState.FAILED.value
                 audit.failure_code = readiness.result.failure_code
                 audit.completed_at = readiness.result.completed_at
+                _record_event(
+                    session,
+                    ids=self._ids,
+                    execution_id=audit.id,
+                    sequence=2,
+                    occurred_at=audit.completed_at or self._clock.now(),
+                    state=ExecutionState.FAILED,
+                    reason_code=audit.failure_code,
+                    detail=readiness.result.detail,
+                )
                 return readiness
 
             inventory = InventoryService(session)
@@ -460,6 +531,16 @@ class GuardedExecutionService:
                 audit.state = ExecutionState.FAILED.value
                 audit.failure_code = "inventory_reservation_failed"
                 audit.completed_at = now
+                _record_event(
+                    session,
+                    ids=self._ids,
+                    execution_id=audit.id,
+                    sequence=2,
+                    occurred_at=now,
+                    state=ExecutionState.FAILED,
+                    reason_code=audit.failure_code,
+                    detail=str(error),
+                )
                 return GuardedExecutionOutcome(
                     result=ExecutionResult(
                         execution_id=request.execution_id,
@@ -477,30 +558,64 @@ class GuardedExecutionService:
             external_references: list[str] = []
             try:
                 for supplier_id, lines in _group_procurement_lines(plan).items():
-                    result = await self._mcp.invoke(
+                    write_key = f"{request.idempotency_key}:{supplier_id}"
+                    payload = {
+                        "planning_run_id": request.planning_run_id,
+                        "supplier_id": supplier_id,
+                        "lines": lines,
+                    }
+                    write = ProviderWriteModel(
+                        id=self._ids.new_id("provider-write"),
+                        execution_id=audit.id,
+                        organization_id=planning_run.organization_id,
+                        supplier_id=supplier_id,
+                        idempotency_key=write_key,
+                        request_payload=payload,
+                        state=ExecutionState.PENDING.value,
+                        attempted_at=self._clock.now(),
+                        completed_at=None,
+                        external_reference=None,
+                        failure_code=None,
+                    )
+                    session.add(write)
+                    await session.flush()
+                    result = await (write_mcp or self._mcp).invoke(
                         MCPToolCall(
                             call_id=self._ids.new_id("mcp"),
                             server_name=self._server_name,
                             tool_name="create_procurement_order",
-                            arguments={
-                                "planning_run_id": request.planning_run_id,
-                                "supplier_id": supplier_id,
-                                "lines": lines,
-                            },
+                            arguments=payload,
                             access_mode=MCPAccessMode.WRITE,
-                            idempotency_key=f"{request.idempotency_key}:{supplier_id}",
+                            idempotency_key=write_key,
                         )
                     )
                     order_id = result.payload.get("order_id")
                     if isinstance(order_id, str):
                         external_references.append(order_id)
-            except Exception:
+                        write.external_reference = order_id
+                    write.state = ExecutionState.SUCCEEDED.value
+                    write.completed_at = self._clock.now()
+            except Exception as error:
                 now = self._clock.now()
+                if "write" in locals():
+                    write.state = ExecutionState.COMPENSATION_REQUIRED.value
+                    write.failure_code = "provider_write_failed"
+                    write.completed_at = now
                 audit.state = ExecutionState.COMPENSATION_REQUIRED.value
                 audit.failure_code = "provider_write_failed"
                 audit.compensation_status = "required"
                 audit.external_references = external_references
                 audit.completed_at = now
+                _record_event(
+                    session,
+                    ids=self._ids,
+                    execution_id=audit.id,
+                    sequence=2,
+                    occurred_at=now,
+                    state=ExecutionState.COMPENSATION_REQUIRED,
+                    reason_code=audit.failure_code,
+                    detail=str(error),
+                )
                 return GuardedExecutionOutcome(
                     result=ExecutionResult(
                         execution_id=request.execution_id,
@@ -519,6 +634,15 @@ class GuardedExecutionService:
             audit.state = ExecutionState.SUCCEEDED.value
             audit.external_references = external_references
             audit.completed_at = now
+            _record_event(
+                session,
+                ids=self._ids,
+                execution_id=audit.id,
+                sequence=2,
+                occurred_at=now,
+                state=ExecutionState.SUCCEEDED,
+                detail="all provider writes completed",
+            )
             return GuardedExecutionOutcome(
                 result=ExecutionResult(
                     execution_id=request.execution_id,
@@ -675,6 +799,83 @@ class GuardedExecutionService:
             decision=evaluation.state.value,
             reasons=evaluation.reason_codes,
             required_investigation=evaluation.required_investigation,
+        )
+
+
+def _record_event(
+    session: AsyncSession,
+    *,
+    ids: IDGenerator,
+    execution_id: str,
+    sequence: int,
+    occurred_at: datetime,
+    state: ExecutionState,
+    reason_code: str | None = None,
+    detail: str | None = None,
+) -> None:
+    session.add(
+        ExecutionAuditEventModel(
+            id=ids.new_id("execution-event"),
+            execution_id=execution_id,
+            sequence=sequence,
+            occurred_at=occurred_at,
+            state=state.value,
+            reason_code=reason_code,
+            detail=detail,
+        )
+    )
+
+
+def _ensure_execution_connection_binding(
+    mcp: MCPPort,
+    *,
+    execution_id: str,
+    approval_receipt_id: str | None,
+    selected_hash: str,
+) -> None:
+    binding = getattr(mcp, "execution_context", None)
+    if binding is None:
+        raise ValueError("execution provider connection is not approval-bound")
+    if (
+        getattr(binding, "execution_id", None) != execution_id
+        or getattr(binding, "approval_receipt_id", None) != approval_receipt_id
+        or getattr(binding, "approved_plan_hash", None) != selected_hash
+    ):
+        raise ValueError("execution provider connection binding does not match approved action")
+
+
+async def _lock_execution_capacity(
+    session: AsyncSession,
+    *,
+    organization_id: str,
+    plan: CandidatePlan,
+) -> None:
+    """Serialize local warehouse/supplier capacity checks for this exact plan."""
+    warehouse_ids = {
+        *(line.destination_warehouse_id for line in plan.procurement),
+        *(line.source_warehouse_id for line in plan.distribution),
+        *(line.destination_warehouse_id for line in plan.distribution),
+    }
+    supplier_ids = {line.supplier_id for line in plan.procurement}
+    if warehouse_ids:
+        await session.execute(
+            select(WarehouseModel.id)
+            .where(
+                WarehouseModel.organization_id == organization_id,
+                WarehouseModel.id.in_(warehouse_ids),
+            )
+            .order_by(WarehouseModel.id)
+            .with_for_update()
+        )
+    if supplier_ids:
+        await session.execute(
+            select(SupplierModel.id)
+            .where(
+                SupplierModel.organization_id == organization_id,
+                SupplierModel.id.in_(supplier_ids),
+            )
+            .order_by(SupplierModel.id)
+            .with_for_update()
         )
 
 

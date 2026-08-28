@@ -29,6 +29,7 @@ from civitas.integrations.model import (
     RetryPolicy,
 )
 from civitas.integrations.providers import (
+    ContextBoundExecutionMCPClient,
     ExecutionProviderContext,
     InMemoryCredentialResolver,
     ProviderConnections,
@@ -44,6 +45,7 @@ __all__ = [
     "DEFAULT_PROCUREMENT_POLICY",
     "DEFAULT_READ_POLICY",
     "CleanRoomNamespace",
+    "ContextBoundExecutionMCPClient",
     "DissentMCPClient",
     "ExecutionMCPClient",
     "ExecutionProviderContext",
