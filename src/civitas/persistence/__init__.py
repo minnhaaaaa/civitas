@@ -26,3 +26,6 @@ from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 
 __all__ = ["PostgreSQLWorkflowCheckpointStore", "PostgreSQLWorkflowRunStore"]
+from civitas.persistence.evidence import PostgreSQLEvidenceLedger
+
+__all__ = ["PostgreSQLEvidenceLedger"]

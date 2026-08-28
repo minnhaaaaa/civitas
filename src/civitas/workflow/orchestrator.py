@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Sequence
+from decimal import Decimal
 from typing import TypedDict
 
 from civitas.agents.parliament import (
@@ -19,6 +20,7 @@ from civitas.contracts.jury import JuryRequest
 from civitas.contracts.optimization import CandidatePlan, OptimizationRequest, OptimizationResult
 from civitas.ports.clock import Clock
 from civitas.ports.ids import IDGenerator
+from civitas.ports.investigation import PlanningInvestigator
 from civitas.ports.jury import JuryPort
 from civitas.ports.optimizer import Optimizer
 from civitas.workflow.events import (
@@ -57,6 +59,7 @@ class ParliamentWorkflow:
         clock: Clock,
         role_agents: Sequence[RoleAgent] | None = None,
         replanner: Callable[[WorkflowCheckpoint], OptimizationRequest] | None = None,
+        investigator: PlanningInvestigator | None = None,
     ) -> None:
         self._optimizer = optimizer
         self._jury = jury
@@ -64,6 +67,7 @@ class ParliamentWorkflow:
         self._clock = clock
         self._role_agents = tuple(role_agents or default_role_agents())
         self._replanner = replanner or (lambda checkpoint: checkpoint.optimization_request)
+        self._investigator = investigator
 
     def start(
         self,
@@ -134,7 +138,7 @@ class ParliamentWorkflow:
             updated, events = await self._jury_round(checkpoint, limits=limits)
             return updated, (*startup_events, *events)
         if checkpoint.phase == WorkflowPhase.INVESTIGATION:
-            updated, events = self._investigate(checkpoint, limits=limits)
+            updated, events = await self._investigate(checkpoint, limits=limits)
             return updated, (*startup_events, *events)
         raise ValueError(f"unsupported phase {checkpoint.phase}")
 
@@ -185,6 +189,13 @@ class ParliamentWorkflow:
         optimization_result = checkpoint.optimization_result
         if optimization_result is None:
             optimization_result = await self._optimizer.solve(checkpoint.optimization_request)
+        if not optimization_result.alternatives:
+            completed, event = self._terminate(
+                checkpoint.model_copy(update={"optimization_result": optimization_result}),
+                WorkflowPhase.ESCALATE,
+                "no_feasible_plan",
+            )
+            return completed, (event,)
         context = ParliamentContext(
             cycle=checkpoint.cycle,
             optimization_request=checkpoint.optimization_request,
@@ -377,7 +388,7 @@ class ParliamentWorkflow:
         )
         return updated, (jury_event, investigation_event)
 
-    def _investigate(
+    async def _investigate(
         self,
         checkpoint: WorkflowCheckpoint,
         *,
@@ -391,7 +402,38 @@ class ParliamentWorkflow:
         if checkpoint.cycle >= limits.max_cycles:
             updated, event = self._terminate(checkpoint, WorkflowPhase.ESCALATE, "cycle_limit")
             return updated, (event,)
-        next_request = self._replanner(checkpoint)
+        if self._investigator is None:
+            next_request = self._replanner(checkpoint)
+            outcome = None
+        else:
+            outcome = await self._investigator.investigate(checkpoint, limits=limits)
+            next_request = outcome.optimization_request
+            if outcome.unavailable_tasks:
+                updated = checkpoint.model_copy(
+                    update={
+                        "unavailable_investigation_tasks": outcome.unavailable_tasks,
+                        "tool_calls_used": checkpoint.tool_calls_used + outcome.tool_calls_used,
+                        "estimated_cost_used": checkpoint.estimated_cost_used
+                        + outcome.estimated_cost,
+                    }
+                )
+                updated, event = self._terminate(
+                    updated, WorkflowPhase.ESCALATE, "required_investigation_unavailable"
+                )
+                return updated, (event,)
+            repeated_fingerprints = set(checkpoint.seen_evidence_fingerprints).intersection(
+                outcome.evidence_fingerprints
+            )
+            repeated_source_groups = set(checkpoint.seen_canonical_source_groups).intersection(
+                outcome.canonical_source_groups
+            )
+            if repeated_fingerprints or (
+                outcome.canonical_source_groups
+                and repeated_source_groups == set(outcome.canonical_source_groups)
+            ):
+                repeated_hits = checkpoint.repeated_evidence_hits + 1
+            else:
+                repeated_hits = checkpoint.repeated_evidence_hits
         updated = checkpoint.model_copy(
             update={
                 "phase": WorkflowPhase.PROPOSAL,
@@ -400,6 +442,52 @@ class ParliamentWorkflow:
                 "optimization_result": None,
                 "parliament": None,
                 "jury_evaluation": checkpoint.jury_evaluation,
+                "investigation_backlog": (),
+                "completed_investigation_tasks": (
+                    checkpoint.completed_investigation_tasks
+                    if outcome is None
+                    else tuple(
+                        dict.fromkeys(
+                            (*checkpoint.completed_investigation_tasks, *outcome.completed_task_ids)
+                        )
+                    )
+                ),
+                "unavailable_investigation_tasks": (),
+                "seen_evidence_ids": (
+                    checkpoint.seen_evidence_ids
+                    if outcome is None
+                    else tuple(
+                        dict.fromkeys((*checkpoint.seen_evidence_ids, *outcome.evidence_ids))
+                    )
+                ),
+                "seen_evidence_fingerprints": (
+                    checkpoint.seen_evidence_fingerprints
+                    if outcome is None
+                    else tuple(
+                        dict.fromkeys(
+                            (*checkpoint.seen_evidence_fingerprints, *outcome.evidence_fingerprints)
+                        )
+                    )
+                ),
+                "seen_canonical_source_groups": (
+                    checkpoint.seen_canonical_source_groups
+                    if outcome is None
+                    else tuple(
+                        dict.fromkeys(
+                            (
+                                *checkpoint.seen_canonical_source_groups,
+                                *outcome.canonical_source_groups,
+                            )
+                        )
+                    )
+                ),
+                "repeated_evidence_hits": (
+                    checkpoint.repeated_evidence_hits if outcome is None else repeated_hits
+                ),
+                "tool_calls_used": checkpoint.tool_calls_used
+                + (0 if outcome is None else outcome.tool_calls_used),
+                "estimated_cost_used": checkpoint.estimated_cost_used
+                + (Decimal("0") if outcome is None else outcome.estimated_cost),
             }
         )
         updated, event = self._record(
@@ -409,6 +497,8 @@ class ParliamentWorkflow:
                 phase=WorkflowPhase.PROPOSAL,
                 cycle=updated.cycle,
                 required_investigation=checkpoint.investigation_backlog,
+                completed_task_ids=() if outcome is None else outcome.completed_task_ids,
+                evidence_ids=() if outcome is None else outcome.evidence_ids,
             ),
         )
         return updated, (event,)
