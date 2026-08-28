@@ -19,6 +19,7 @@ from civitas.persistence.repositories import (
     SupplierRepository,
     WarehouseRepository,
 )
+from civitas.persistence.tenant_repositories import TenantRepositories
 
 
 class Database:
@@ -98,6 +99,10 @@ class SQLAlchemyUnitOfWork:
     @property
     def inventory(self) -> InventoryService:
         return InventoryService(self.require_session())
+
+    def for_organization(self, organization_id: str) -> TenantRepositories:
+        """Return the mandatory tenant-scoped API for authenticated request paths."""
+        return TenantRepositories(self.require_session(), organization_id)
 
     async def commit(self) -> None:
         await self.require_session().commit()

@@ -8,6 +8,14 @@ Codex is a presentation and intent-capture layer, not an execution authority. Th
 
 Every call must derive organization and operator identity from authenticated deployment context rather than model-supplied identifiers. Structured arguments remain untrusted input and receive the same strict validation, ownership checks, limits, and audit treatment as guarded HTTP requests. Remote multi-tenant MCP deployments require OAuth; controlled single-tenant deployments may use rotated bearer credentials over TLS.
 
+The production bearer adapter stores only SHA-256 credential digests, compares
+them in constant time, and enforces activation, expiry, and revocation. Each
+credential resolves immutable organization, operator, subject, and role claims.
+Streamable HTTP validates or creates a correlation ID, rate-limits by resolved
+tenant/operator, and emits authentication audit events without credential values.
+Intent-tool authorization is deterministic; an execution-capable role still
+cannot bypass the immutable approval receipt and guarded execution checks.
+
 The Codex-facing server and procurement-provider clients must not share credentials. Dissent keeps read-only outbound credentials and isolated cache namespaces. Execution obtains only the minimum outbound write capability required for the approved action.
 
 ## Local demonstration
@@ -46,7 +54,9 @@ Model output is treated as untrusted: responses are capped at 1 MiB, parsed as J
 - The generic Parliament workflow currently uses deterministic role implementations. The Groq adapter is contract-tested but is not yet composed into those roles for explanatory challenge text.
 - The generic investigation transition accepts a replanner callback; the demo performs real read-only MCP investigation around that transition. A production composition still needs a durable investigation worker.
 - `compile_langgraph()` describes the approved topology, while durable resume is implemented by PostgreSQL workflow-event snapshots rather than a LangGraph checkpointer.
-- Generic repositories are infrastructure primitives and are not tenant-safe API surfaces by themselves. Tenant ownership is enforced in guarded API and execution services; future repository APIs should require organization scope before broader reuse.
+- Generic repositories are trusted migration/import primitives. Authenticated
+  paths use the tenant-bound repository factory, which scopes direct rows by
+  organization and scopes child inputs through their owning planning run.
 - The guarded API factory is tested but is not the same app as the unauthenticated offline demo factory. Deployment composition and operator identity remain environment-specific.
 
 These limitations mean the offline demonstration is end-to-end, but the repository is not yet a production-ready autonomous procurement deployment.

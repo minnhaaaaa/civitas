@@ -9,6 +9,7 @@ from civitas.persistence.inventory import (
     LotBalance,
 )
 from civitas.persistence.models import Base
+from civitas.persistence.tenant_repositories import TenantRepositories
 
 __all__ = [
     "Base",
@@ -19,6 +20,7 @@ __all__ = [
     "InventoryService",
     "LotBalance",
     "SQLAlchemyUnitOfWork",
+    "TenantRepositories",
 ]
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
