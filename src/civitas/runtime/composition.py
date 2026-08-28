@@ -118,6 +118,7 @@ def build_worker(settings: RuntimeSettings) -> DurableWorkflowWorker:
         store=runtime.checkpoints,
         clock=SystemClock(),
         lease_for=timedelta(seconds=settings.worker_lease_seconds),
+        max_attempts=settings.worker_max_attempts,
         close=runtime.close,
     )
 

@@ -1,5 +1,6 @@
 """Composition-root tests without external PostgreSQL or provider calls."""
 
+from dataclasses import replace
 from datetime import UTC
 
 import pytest
@@ -36,6 +37,11 @@ def test_environment_configuration_rejects_non_postgres_database() -> None:
             operator_subject="subject-1",
             operator_roles=(),
         )
+
+
+def test_environment_configuration_rejects_unbounded_worker_attempts() -> None:
+    with pytest.raises(SettingsError, match="WORKER_MAX_ATTEMPTS"):
+        replace(_settings(), worker_max_attempts=0)
 
 
 @pytest.mark.asyncio

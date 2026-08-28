@@ -192,6 +192,14 @@ async def test_facade_store_persists_tenant_run_limits_buckets_and_progress(
     assert resumed is not None
     assert resumed.checkpoint.phase is WorkflowPhase.CHALLENGE
     assert [event.sequence for event in resumed.events] == [1, 2]
+    async with sessions() as session:
+        planning_run = await session.get(PlanningRunModel, run_id)
+        assert planning_run is not None and planning_run.status == "planning"
+    while await worker.process_next():
+        pass
+    async with sessions() as session:
+        planning_run = await session.get(PlanningRunModel, run_id)
+        assert planning_run is not None and planning_run.status == "ready_for_approval"
     assert await runs.get(context=_context("another-org"), run_id=run_id) is None
 
 

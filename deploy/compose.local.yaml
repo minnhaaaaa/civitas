@@ -63,6 +63,8 @@ services:
     environment:
       <<: *civitas-environment
       CIVITAS_WORKER_FACTORY: civitas.runtime:create_worker
+      CIVITAS_WORKER_LEASE_SECONDS: ${CIVITAS_WORKER_LEASE_SECONDS:-60}
+      CIVITAS_WORKER_MAX_ATTEMPTS: ${CIVITAS_WORKER_MAX_ATTEMPTS:-5}
     depends_on:
       migrations:
         condition: service_completed_successfully

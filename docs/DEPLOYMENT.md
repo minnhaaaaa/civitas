@@ -21,20 +21,21 @@ with `curl -fsS http://127.0.0.1:8000/health`. The local profile serves the
 deterministic demonstration API and does not contact a real provider or create
 real purchase orders.
 
-After the inbound-server and durable-worker branches are assembled, include the
-MCP workers and simulated provider:
+Include the MCP server, durable worker, and simulated provider with:
 
 ```bash
 docker compose -f deploy/compose.local.yaml --profile mcp up --build
 ```
 
-Those services deliberately fail closed on this base branch rather than claim
-they are ready. Their entrypoints are provided by the Agent 1 and Agent 4
-deliverables. Configure their exact assembled commands at runtime via
-`CIVITAS_MCP_SERVER_COMMAND`, `CIVITAS_WORKER_COMMAND`, and
-`CIVITAS_SIMULATED_PROVIDER_COMMAND`; the wrappers `exec` those commands rather
-than providing a second execution path. This avoids a fake worker that could
-silently drop planning work.
+The MCP server and durable worker use the production composition and PostgreSQL
+checkpoint queue. The simulated provider remains an explicit offline test
+boundary and never authorizes real procurement. Provider writes continue to
+fail closed until the guarded approval/execution workstream is integrated.
+
+Worker leases renew while a transition is running. Configure
+`CIVITAS_WORKER_LEASE_SECONDS` for the expected provider latency and
+`CIVITAS_WORKER_MAX_ATTEMPTS` for the poison-work bound. Exhausting that bound
+persists an `ESCALATE` checkpoint and monotonic failure event.
 
 Stop services without deleting the audit database:
 

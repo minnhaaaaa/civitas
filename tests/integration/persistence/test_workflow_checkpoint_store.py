@@ -155,6 +155,42 @@ async def test_postgresql_recovers_abandoned_work_and_rejects_stale_owner(
 
 
 @pytest.mark.asyncio
+async def test_postgresql_lease_renewal_prevents_early_reclaim(
+    database: object, planning_run: str
+) -> None:
+    store = PostgreSQLWorkflowCheckpointStore(  # type: ignore[attr-defined]
+        database.sessions, now_factory=lambda: datetime(2000, 1, 2, tzinfo=UTC)
+    )
+    checkpoint = _checkpoint(planning_run)
+    await store.enqueue(checkpoint)
+    now = datetime.now(UTC) + timedelta(seconds=1)
+    lease = await store.claim(worker_id="worker-a", now=now, lease_for=timedelta(seconds=1))
+    assert lease is not None
+
+    renewed = await store.renew(
+        lease=lease,
+        now=now + timedelta(milliseconds=500),
+        lease_for=timedelta(seconds=2),
+    )
+
+    assert renewed.token == lease.token
+    assert (
+        await store.claim(
+            worker_id="worker-b",
+            now=now + timedelta(milliseconds=1500),
+            lease_for=timedelta(seconds=1),
+        )
+        is None
+    )
+    await store.commit_transition(
+        lease=lease,
+        checkpoint=checkpoint,
+        events=(),
+        now=now + timedelta(milliseconds=1500),
+    )
+
+
+@pytest.mark.asyncio
 async def test_postgresql_rejects_non_monotonic_progress_events(
     database: object, planning_run: str
 ) -> None:

@@ -71,3 +71,9 @@ The new integration cases cover concurrent claims, restart/resume persistence,
 expired-lease recovery, stale-owner rejection, monotonic event cursors,
 tenant-scoped run creation, operational-input ownership, per-run autonomy limits,
 calendar buckets, runtime composition, and durable progress retrieval.
+
+## Combined-branch follow-up
+
+Branch `live/agents-1-3-integration` adds renewable lease heartbeats, bounded
+poison-work escalation, and canonical `PlanningRunStatus` persistence. These
+close the production-readiness issues found during the Agent 2 handoff review.

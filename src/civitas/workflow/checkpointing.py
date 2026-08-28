@@ -29,6 +29,7 @@ class WorkflowLease:
     checkpoint: WorkflowCheckpoint
     expires_at: datetime
     limits: WorkflowLimits | None = None
+    attempt_count: int = 1
 
 
 class WorkflowCheckpointStore(Protocol):
@@ -39,6 +40,10 @@ class WorkflowCheckpointStore(Protocol):
     async def claim(
         self, *, worker_id: str, now: datetime, lease_for: timedelta
     ) -> WorkflowLease | None: ...
+
+    async def renew(
+        self, *, lease: WorkflowLease, now: datetime, lease_for: timedelta
+    ) -> WorkflowLease: ...
 
     async def commit_transition(
         self,
@@ -66,6 +71,7 @@ class _StoredRun:
     events: list[WorkflowEvent]
     limits: WorkflowLimits | None = None
     lease: WorkflowLease | None = None
+    attempt_count: int = 0
 
 
 class InMemoryWorkflowCheckpointStore:
@@ -100,6 +106,7 @@ class InMemoryWorkflowCheckpointStore:
                 if run.lease is not None and run.lease.expires_at > now:
                     continue
                 self._next_token += 1
+                run.attempt_count += 1
                 lease = WorkflowLease(
                     planning_run_id=run_id,
                     worker_id=worker_id,
@@ -107,10 +114,33 @@ class InMemoryWorkflowCheckpointStore:
                     checkpoint=run.checkpoint,
                     expires_at=now + lease_for,
                     limits=run.limits,
+                    attempt_count=run.attempt_count,
                 )
                 run.lease = lease
                 return lease
         return None
+
+    async def renew(
+        self, *, lease: WorkflowLease, now: datetime, lease_for: timedelta
+    ) -> WorkflowLease:
+        if lease_for <= timedelta(0):
+            raise ValueError("lease_for must be positive")
+        async with self._lock:
+            run = self._runs.get(lease.planning_run_id)
+            if not _owns_lease(run, lease, now):
+                raise CheckpointConflictError("workflow lease is no longer valid")
+            renewed = WorkflowLease(
+                planning_run_id=lease.planning_run_id,
+                worker_id=lease.worker_id,
+                token=lease.token,
+                checkpoint=lease.checkpoint,
+                expires_at=now + lease_for,
+                limits=lease.limits,
+                attempt_count=lease.attempt_count,
+            )
+            assert run is not None
+            run.lease = renewed
+            return renewed
 
     async def commit_transition(
         self,
@@ -122,8 +152,9 @@ class InMemoryWorkflowCheckpointStore:
     ) -> None:
         async with self._lock:
             run = self._runs.get(lease.planning_run_id)
-            if run is None or run.lease != lease or lease.expires_at <= now:
+            if not _owns_lease(run, lease, now):
                 raise CheckpointConflictError("workflow lease is no longer valid")
+            assert run is not None
             if checkpoint.planning_run_id != lease.planning_run_id:
                 raise CheckpointConflictError("checkpoint belongs to a different run")
             if checkpoint.event_sequence < run.checkpoint.event_sequence:
@@ -142,7 +173,7 @@ class InMemoryWorkflowCheckpointStore:
     async def release(self, lease: WorkflowLease) -> None:
         async with self._lock:
             run = self._runs.get(lease.planning_run_id)
-            if run is not None and run.lease == lease:
+            if run is not None and _same_lease(run.lease, lease):
                 run.lease = None
 
     async def recover_abandoned(self, *, now: datetime) -> int:
@@ -169,3 +200,20 @@ class InMemoryWorkflowCheckpointStore:
             if run is None:
                 return ()
             return tuple(event for event in run.events if event.sequence > after_sequence)[:limit]
+
+
+def _same_lease(current: WorkflowLease | None, supplied: WorkflowLease) -> bool:
+    return bool(
+        current is not None
+        and current.worker_id == supplied.worker_id
+        and current.token == supplied.token
+    )
+
+
+def _owns_lease(run: _StoredRun | None, supplied: WorkflowLease, now: datetime) -> bool:
+    return bool(
+        run is not None
+        and _same_lease(run.lease, supplied)
+        and run.lease is not None
+        and run.lease.expires_at > now
+    )

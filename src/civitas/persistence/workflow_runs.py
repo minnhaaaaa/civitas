@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from civitas.application.procurement_facade import WorkflowRunSnapshot
 from civitas.contracts.enums import WorkflowEventType
-from civitas.contracts.mcp_product import PlanningProgress, ProcurementGoal
+from civitas.contracts.mcp_product import PlanningProgress, PlanningRunStatus, ProcurementGoal
 from civitas.contracts.optimization import OptimizationRequest
 from civitas.persistence.models import (
     OrganizationModel,
@@ -80,7 +80,7 @@ class PostgreSQLWorkflowRunStore:
                     bucket_duration=timedelta(days=1),
                     timezone=goal.timezone,
                     input_data_version=optimization_request.input_data_version,
-                    status=checkpoint.phase.value,
+                    status=PlanningRunStatus.PLANNING.value,
                 )
                 session.add(planning_run)
                 # The mappings intentionally have no ORM relationships. Flush the

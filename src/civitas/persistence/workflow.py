@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from civitas.contracts.enums import WorkflowEventType
+from civitas.contracts.mcp_product import PlanningRunStatus
 from civitas.contracts.workflow import WorkflowEvent
 from civitas.persistence.models import (
     PlanningRunModel,
@@ -18,7 +19,7 @@ from civitas.persistence.models import (
     WorkflowEventModel,
 )
 from civitas.workflow.checkpointing import CheckpointConflictError, WorkflowLease
-from civitas.workflow.models import WorkflowCheckpoint, WorkflowLimits
+from civitas.workflow.models import WorkflowCheckpoint, WorkflowLimits, WorkflowPhase
 
 
 class PostgreSQLWorkflowCheckpointStore:
@@ -109,6 +110,33 @@ class PostgreSQLWorkflowCheckpointStore:
                 checkpoint=checkpoint,
                 expires_at=expires_at,
                 limits=limits,
+                attempt_count=row.attempt_count,
+            )
+
+    async def renew(
+        self, *, lease: WorkflowLease, now: datetime, lease_for: timedelta
+    ) -> WorkflowLease:
+        _validate_claim(worker_id=lease.worker_id, now=now, lease_for=lease_for)
+        async with self._sessions() as session, session.begin():
+            row = await session.scalar(
+                select(WorkflowCheckpointModel)
+                .where(WorkflowCheckpointModel.planning_run_id == lease.planning_run_id)
+                .with_for_update()
+            )
+            if not _owns_valid_lease(row, lease, now):
+                raise CheckpointConflictError("workflow lease is no longer valid")
+            assert row is not None
+            expires_at = now + lease_for
+            row.lease_expires_at = expires_at
+            row.updated_at = now
+            return WorkflowLease(
+                planning_run_id=lease.planning_run_id,
+                worker_id=lease.worker_id,
+                token=lease.token,
+                checkpoint=lease.checkpoint,
+                expires_at=expires_at,
+                limits=lease.limits,
+                attempt_count=lease.attempt_count,
             )
 
     async def commit_transition(
@@ -163,7 +191,7 @@ class PostgreSQLWorkflowCheckpointStore:
             await session.execute(
                 update(PlanningRunModel)
                 .where(PlanningRunModel.id == checkpoint.planning_run_id)
-                .values(status=checkpoint.final_state or checkpoint.phase.value)
+                .values(status=_planning_run_status(checkpoint))
             )
 
     async def release(self, lease: WorkflowLease) -> None:
@@ -312,3 +340,15 @@ def _aware_now() -> datetime:
 def _require_aware(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
+
+
+def _planning_run_status(checkpoint: WorkflowCheckpoint) -> str:
+    if checkpoint.phase is WorkflowPhase.APPROVE:
+        return PlanningRunStatus.READY_FOR_APPROVAL.value
+    if checkpoint.phase is WorkflowPhase.REJECT:
+        return PlanningRunStatus.REJECTED.value
+    if checkpoint.phase is WorkflowPhase.ESCALATE:
+        return PlanningRunStatus.ESCALATED.value
+    if checkpoint.phase is WorkflowPhase.INVESTIGATION:
+        return PlanningRunStatus.INVESTIGATING.value
+    return PlanningRunStatus.PLANNING.value
