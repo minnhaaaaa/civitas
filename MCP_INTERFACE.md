@@ -175,11 +175,12 @@ database, approval-secret, bearer-identity, organization, and operator bindings;
 then assembles the facade, OR-Tools workflow, fail-closed Jury, persisted approval
 service, identity resolver, and authenticated Streamable HTTP transport.
 
-The composition intentionally exposes narrow replacement seams for the remaining
-live workstreams. Until their branches are integrated, workflow runs use the
-documented inline non-durable adapter, evidence/Dissent absence fails the Jury
-closed, and outbound provider execution is rejected. Therefore this branch is a
-real inbound service process but is not yet a live-buying release. PostgreSQL
-checkpointing/worker leasing, operational provider adapters, persisted guarded
+The composition now uses PostgreSQL planning-run metadata, checkpointing, durable
+queue leases, resumable progress events, and a separately deployable worker by
+default. Each queued run retains its organization scope, goal, policy version,
+and autonomy limits. Evidence/Dissent absence still fails the Jury closed, and
+outbound provider execution remains rejected until the remaining workstreams are
+integrated. Therefore this branch is a durable inbound planning service but is
+not yet a live-buying release. Operational provider adapters, persisted guarded
 execution, and production OAuth identity must replace those seams before that
 claim is made.

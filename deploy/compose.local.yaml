@@ -55,12 +55,14 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
-  # This service becomes available after the Agent 4 durable worker package is merged.
+  # Durable workflow worker; execution side effects remain in the guarded execution service.
   worker:
     profiles: ["mcp"]
     image: civitas:local
-    environment: *civitas-environment
-    command: ["python", "scripts/run_worker.py"]
+    command: ["civitas-worker"]
+    environment:
+      <<: *civitas-environment
+      CIVITAS_WORKER_FACTORY: civitas.runtime:create_worker
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -73,7 +75,9 @@ services:
   mcp-server:
     profiles: ["mcp"]
     image: civitas:local
-    environment: *civitas-environment
+    environment:
+      <<: *civitas-environment
+      CIVITAS_MCP_HOST: 0.0.0.0
     command: ["civitas-mcp"]
     ports:
       - "${CIVITAS_MCP_PORT:-8001}:8001"

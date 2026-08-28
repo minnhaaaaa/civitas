@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import hmac
 import uuid
 from datetime import UTC, datetime
 
-from civitas.application.procurement_facade import WorkflowRunSnapshot
 from civitas.approval.service import (
     ApprovalError,
     ApprovalService,
@@ -24,18 +22,12 @@ from civitas.contracts.mcp_product import (
     ExecuteApprovedPlanRequest,
     ExecutionAuditEntry,
     ExecutionReceipt,
-    PlanningProgress,
-    ProcurementGoal,
     ProductError,
     ProductErrorCode,
     ProductServiceError,
 )
-from civitas.contracts.optimization import OptimizationRequest
-from civitas.contracts.workflow import WorkflowEvent
 from civitas.evidence.jury import JuryEvaluator, JuryInputs
 from civitas.ports.identity import OperatorContext
-from civitas.workflow.models import WorkflowLimits
-from civitas.workflow.orchestrator import ParliamentWorkflow
 
 
 class SystemClock:
@@ -103,54 +95,6 @@ class FailClosedJuryPort:
         )
 
 
-class InlineWorkflowRunStore:
-    """Organization-scoped composition fallback.
-
-    Agent 2 replaces this adapter with its PostgreSQL queue/checkpoint store. Running the
-    workflow inline keeps the composition executable without pretending it is durable.
-    """
-
-    def __init__(self, *, workflow: ParliamentWorkflow, clock: SystemClock, policy_version: str):
-        self._workflow = workflow
-        self._clock = clock
-        self._policy_version = policy_version
-        self._runs: dict[tuple[str, str], WorkflowRunSnapshot] = {}
-        self._lock = asyncio.Lock()
-
-    async def start(
-        self,
-        *,
-        context: OperatorContext,
-        run_id: str,
-        goal: ProcurementGoal,
-        optimization_request: OptimizationRequest,
-        limits: WorkflowLimits,
-    ) -> WorkflowRunSnapshot:
-        del goal
-        created_at = self._clock.now()
-        result = await self._workflow.run(
-            self._workflow.start(planning_run_id=run_id, optimization_request=optimization_request),
-            limits=limits,
-        )
-        events = tuple(WorkflowEvent.model_validate(event) for event in result.events)
-        snapshot = WorkflowRunSnapshot(
-            organization_id=context.organization_id,
-            run_id=run_id,
-            policy_version=self._policy_version,
-            created_at=created_at,
-            updated_at=self._clock.now(),
-            checkpoint=result.checkpoint,
-            events=tuple(_progress(event) for event in events),
-        )
-        async with self._lock:
-            self._runs[(context.organization_id, run_id)] = snapshot
-        return snapshot
-
-    async def get(self, *, context: OperatorContext, run_id: str) -> WorkflowRunSnapshot | None:
-        async with self._lock:
-            return self._runs.get((context.organization_id, run_id))
-
-
 class ApprovalFacadeAdapter:
     def __init__(self, service: ApprovalService) -> None:
         self._service = service
@@ -214,23 +158,6 @@ class DisabledExecutionPort:
     ) -> tuple[ExecutionReceipt, tuple[ExecutionAuditEntry, ...]]:
         del context, run_id, receipt_id, after_sequence, page_size
         raise _product_error(ProductErrorCode.NOT_FOUND, "execution receipt not found")
-
-
-def _progress(event: WorkflowEvent) -> PlanningProgress:
-    phase = event.payload.get("phase")
-    raw_reason_codes = event.payload.get("reason_codes", [])
-    reason_codes = (
-        tuple(str(code) for code in raw_reason_codes if isinstance(code, str))
-        if isinstance(raw_reason_codes, list)
-        else ()
-    )
-    return PlanningProgress(
-        sequence=event.sequence,
-        occurred_at=event.occurred_at,
-        phase=phase if isinstance(phase, str) else event.event_type.value,
-        message=event.event_type.value.replace(".", " ").capitalize(),
-        reason_codes=reason_codes,
-    )
 
 
 def _product_error(code: ProductErrorCode, message: str) -> ProductServiceError:

@@ -24,6 +24,8 @@ class RuntimeSettings:
     port: int = 8001
     log_level: str = "info"
     policy_version: str = "decision-integrity-v1"
+    worker_id: str | None = None
+    worker_lease_seconds: int = 60
 
     def __post_init__(self) -> None:
         if not self.database_url.startswith(
@@ -40,6 +42,10 @@ class RuntimeSettings:
             raise SettingsError("CIVITAS_MCP_TRANSPORT must be stdio or streamable-http")
         if not 1 <= self.port <= 65535:
             raise SettingsError("CIVITAS_MCP_PORT must be between 1 and 65535")
+        if self.worker_id is not None and not 1 <= len(self.worker_id.strip()) <= 128:
+            raise SettingsError("CIVITAS_WORKER_ID must contain between 1 and 128 characters")
+        if not 5 <= self.worker_lease_seconds <= 3600:
+            raise SettingsError("CIVITAS_WORKER_LEASE_SECONDS must be between 5 and 3600")
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> RuntimeSettings:
@@ -61,6 +67,8 @@ class RuntimeSettings:
             port=_integer(values, "CIVITAS_MCP_PORT", 8001),
             log_level=values.get("CIVITAS_LOG_LEVEL", "info"),
             policy_version=values.get("CIVITAS_INTEGRITY_POLICY_VERSION", "decision-integrity-v1"),
+            worker_id=values.get("CIVITAS_WORKER_ID"),
+            worker_lease_seconds=_integer(values, "CIVITAS_WORKER_LEASE_SECONDS", 60),
         )
 
 

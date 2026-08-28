@@ -71,21 +71,24 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     if not args.factory:
         raise SystemExit("--factory or CIVITAS_WORKER_FACTORY is required")
     worker = await _create_worker(_load_factory(args.factory))
-    runner = WorkerRunner(
-        worker,
-        poll_interval=args.poll_interval,
-        recovery_interval=args.recovery_interval,
-    )
-    if args.once:
-        await runner.run_once()
+    try:
+        runner = WorkerRunner(
+            worker,
+            poll_interval=args.poll_interval,
+            recovery_interval=args.recovery_interval,
+        )
+        if args.once:
+            await runner.run_once()
+            return 0
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with suppress(NotImplementedError):  # pragma: no cover - Windows compatibility
+                loop.add_signal_handler(signum, stop.set)
+        await runner.run(stop)
         return 0
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):  # pragma: no cover - Windows compatibility
-            loop.add_signal_handler(signum, stop.set)
-    await runner.run(stop)
-    return 0
+    finally:
+        await worker.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

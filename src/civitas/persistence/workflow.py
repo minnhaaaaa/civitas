@@ -18,7 +18,7 @@ from civitas.persistence.models import (
     WorkflowEventModel,
 )
 from civitas.workflow.checkpointing import CheckpointConflictError, WorkflowLease
-from civitas.workflow.models import WorkflowCheckpoint
+from civitas.workflow.models import WorkflowCheckpoint, WorkflowLimits
 
 
 class PostgreSQLWorkflowCheckpointStore:
@@ -39,12 +39,15 @@ class PostgreSQLWorkflowCheckpointStore:
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
         self._now_factory = now_factory or _aware_now
 
-    async def enqueue(self, checkpoint: WorkflowCheckpoint) -> None:
+    async def enqueue(
+        self, checkpoint: WorkflowCheckpoint, *, limits: WorkflowLimits | None = None
+    ) -> None:
         now = self._now_factory()
         _require_aware(now, "now_factory result")
         row = WorkflowCheckpointModel(
             planning_run_id=checkpoint.planning_run_id,
             checkpoint=checkpoint.model_dump(mode="json"),
+            workflow_limits=None if limits is None else limits.model_dump(mode="json"),
             phase=checkpoint.phase.value,
             cycle=checkpoint.cycle,
             event_sequence=checkpoint.event_sequence,
@@ -94,12 +97,18 @@ class PostgreSQLWorkflowCheckpointStore:
             row.attempt_count += 1
             row.updated_at = now
             checkpoint = WorkflowCheckpoint.model_validate(row.checkpoint)
+            limits = (
+                None
+                if row.workflow_limits is None
+                else WorkflowLimits.model_validate(row.workflow_limits)
+            )
             return WorkflowLease(
                 planning_run_id=row.planning_run_id,
                 worker_id=worker_id,
                 token=token,
                 checkpoint=checkpoint,
                 expires_at=expires_at,
+                limits=limits,
             )
 
     async def commit_transition(

@@ -4,7 +4,8 @@ from datetime import UTC
 
 import pytest
 
-from civitas.runtime import RuntimeSettings, SettingsError, build_runtime
+from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
+from civitas.runtime import RuntimeSettings, SettingsError, build_runtime, build_worker
 
 
 def _settings() -> RuntimeSettings:
@@ -43,6 +44,7 @@ async def test_composition_wires_authenticated_mcp_and_rejects_wrong_token() -> 
     try:
         assert runtime.facade is not None
         assert runtime.workflow is not None
+        assert isinstance(runtime.workflow_runs, PostgreSQLWorkflowRunStore)
         assert runtime.mcp_server.mcp.name == "Civitas"
         assert await runtime.identity.resolve("wrong-token") is None
         context = await runtime.identity.resolve("t" * 32)
@@ -52,6 +54,13 @@ async def test_composition_wires_authenticated_mcp_and_rejects_wrong_token() -> 
         assert context.authenticated_at.tzinfo is UTC
     finally:
         await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_composition_uses_durable_run_limits_and_closes_database() -> None:
+    worker = build_worker(_settings())
+    assert worker is not None
+    await worker.close()
 
 
 @pytest.mark.asyncio

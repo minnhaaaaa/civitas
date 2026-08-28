@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from civitas.application.procurement_facade import (
@@ -14,16 +15,18 @@ from civitas.approval.service import ApprovalService
 from civitas.mcp_server import InboundMCPServer
 from civitas.optimization.adapter import OrToolsOptimizer
 from civitas.persistence.database import Database
+from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
+from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 from civitas.runtime.adapters import (
     ApprovalFacadeAdapter,
     ControlledBearerIdentity,
     DisabledExecutionPort,
     FailClosedJuryPort,
-    InlineWorkflowRunStore,
     SystemClock,
     UUIDGenerator,
 )
 from civitas.runtime.config import RuntimeSettings
+from civitas.worker import DurableWorkflowWorker
 from civitas.workflow.orchestrator import ParliamentWorkflow
 
 
@@ -32,6 +35,8 @@ class RuntimeApplication:
     settings: RuntimeSettings
     database: Database
     workflow: ParliamentWorkflow
+    checkpoints: PostgreSQLWorkflowCheckpointStore
+    workflow_runs: WorkflowRunStore
     facade: ProcurementApplicationFacade
     identity: ControlledBearerIdentity
     mcp_server: InboundMCPServer
@@ -59,8 +64,13 @@ def build_runtime(
     optimizer = OrToolsOptimizer()
     jury = FailClosedJuryPort(ids=ids, clock=clock)
     workflow = ParliamentWorkflow(optimizer=optimizer, jury=jury, ids=ids, clock=clock)
-    run_store = workflow_runs or InlineWorkflowRunStore(
-        workflow=workflow, clock=clock, policy_version=settings.policy_version
+    checkpoints = PostgreSQLWorkflowCheckpointStore(database.sessions)
+    run_store = workflow_runs or PostgreSQLWorkflowRunStore(
+        sessions=database.sessions,
+        workflow=workflow,
+        ids=ids,
+        clock=clock,
+        policy_version=settings.policy_version,
     )
     approval_service = ApprovalService(
         sessions=database.sessions,
@@ -89,7 +99,30 @@ def build_runtime(
         settings=settings,
         database=database,
         workflow=workflow,
+        checkpoints=checkpoints,
+        workflow_runs=run_store,
         facade=facade,
         identity=identity,
         mcp_server=server,
     )
+
+
+def build_worker(settings: RuntimeSettings) -> DurableWorkflowWorker:
+    """Build a worker that reads each run's durable autonomy limits."""
+
+    runtime = build_runtime(settings)
+    worker_id = settings.worker_id or UUIDGenerator().new_id("worker")
+    return DurableWorkflowWorker(
+        worker_id=worker_id,
+        workflow=runtime.workflow,
+        store=runtime.checkpoints,
+        clock=SystemClock(),
+        lease_for=timedelta(seconds=settings.worker_lease_seconds),
+        close=runtime.close,
+    )
+
+
+def create_worker() -> DurableWorkflowWorker:
+    """Environment-driven factory consumed by ``civitas-worker``."""
+
+    return build_worker(RuntimeSettings.from_env())

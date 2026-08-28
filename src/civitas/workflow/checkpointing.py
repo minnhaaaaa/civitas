@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from civitas.contracts.workflow import WorkflowEvent
-from civitas.workflow.models import WorkflowCheckpoint
+from civitas.workflow.models import WorkflowCheckpoint, WorkflowLimits
 
 
 class CheckpointConflictError(RuntimeError):
@@ -28,10 +28,13 @@ class WorkflowLease:
     token: str
     checkpoint: WorkflowCheckpoint
     expires_at: datetime
+    limits: WorkflowLimits | None = None
 
 
 class WorkflowCheckpointStore(Protocol):
-    async def enqueue(self, checkpoint: WorkflowCheckpoint) -> None: ...
+    async def enqueue(
+        self, checkpoint: WorkflowCheckpoint, *, limits: WorkflowLimits | None = None
+    ) -> None: ...
 
     async def claim(
         self, *, worker_id: str, now: datetime, lease_for: timedelta
@@ -61,6 +64,7 @@ class WorkflowCheckpointStore(Protocol):
 class _StoredRun:
     checkpoint: WorkflowCheckpoint
     events: list[WorkflowEvent]
+    limits: WorkflowLimits | None = None
     lease: WorkflowLease | None = None
 
 
@@ -77,11 +81,13 @@ class InMemoryWorkflowCheckpointStore:
         self._lock = asyncio.Lock()
         self._next_token = 0
 
-    async def enqueue(self, checkpoint: WorkflowCheckpoint) -> None:
+    async def enqueue(
+        self, checkpoint: WorkflowCheckpoint, *, limits: WorkflowLimits | None = None
+    ) -> None:
         async with self._lock:
             if checkpoint.planning_run_id in self._runs:
                 raise CheckpointConflictError("planning run already exists")
-            self._runs[checkpoint.planning_run_id] = _StoredRun(checkpoint, [])
+            self._runs[checkpoint.planning_run_id] = _StoredRun(checkpoint, [], limits)
 
     async def claim(
         self, *, worker_id: str, now: datetime, lease_for: timedelta
@@ -100,6 +106,7 @@ class InMemoryWorkflowCheckpointStore:
                     token=f"lease-{self._next_token}",
                     checkpoint=run.checkpoint,
                     expires_at=now + lease_for,
+                    limits=run.limits,
                 )
                 run.lease = lease
                 return lease

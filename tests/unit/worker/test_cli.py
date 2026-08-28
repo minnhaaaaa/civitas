@@ -10,6 +10,7 @@ class FakeWorker:
         self.outcomes = outcomes
         self.recoveries = 0
         self.processed = 0
+        self.closed = 0
 
     async def recover_abandoned(self) -> int:
         self.recoveries += 1
@@ -18,6 +19,9 @@ class FakeWorker:
     async def process_next(self) -> bool:
         self.processed += 1
         return self.outcomes.pop(0) if self.outcomes else False
+
+    async def close(self) -> None:
+        self.closed += 1
 
 
 @pytest.mark.asyncio

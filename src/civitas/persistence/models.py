@@ -491,6 +491,9 @@ class WorkflowCheckpointModel(TimestampMixin, Base):
         ForeignKey("planning_runs.id", ondelete="CASCADE"), primary_key=True
     )
     checkpoint: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    workflow_limits: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    procurement_goal: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    policy_version: Mapped[str | None] = mapped_column(String(64))
     phase: Mapped[str] = mapped_column(String(32), nullable=False)
     cycle: Mapped[int] = mapped_column(Integer, nullable=False)
     event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

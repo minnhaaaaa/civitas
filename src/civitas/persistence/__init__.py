@@ -21,5 +21,6 @@ __all__ = [
     "SQLAlchemyUnitOfWork",
 ]
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
+from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 
-__all__ = ["PostgreSQLWorkflowCheckpointStore"]
+__all__ = ["PostgreSQLWorkflowCheckpointStore", "PostgreSQLWorkflowRunStore"]

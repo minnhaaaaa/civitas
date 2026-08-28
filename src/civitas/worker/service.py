@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -27,8 +27,9 @@ class DurableWorkflowWorker:
         workflow: ParliamentWorkflow,
         store: WorkflowCheckpointStore,
         clock: Clock,
-        limits: WorkflowLimits,
+        limits: WorkflowLimits | None = None,
         lease_for: timedelta = timedelta(minutes=1),
+        close: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if not worker_id.strip() or lease_for <= timedelta(0):
             raise ValueError("worker_id and a positive lease duration are required")
@@ -38,9 +39,12 @@ class DurableWorkflowWorker:
         self._clock = clock
         self._limits = limits
         self._lease_for = lease_for
+        self._close = close
 
-    async def enqueue(self, checkpoint: WorkflowCheckpoint) -> None:
-        await self._store.enqueue(checkpoint)
+    async def enqueue(
+        self, checkpoint: WorkflowCheckpoint, *, limits: WorkflowLimits | None = None
+    ) -> None:
+        await self._store.enqueue(checkpoint, limits=limits or self._limits)
 
     async def recover_abandoned(self) -> int:
         """Make expired leases eligible before the next polling cycle."""
@@ -55,7 +59,10 @@ class DurableWorkflowWorker:
         if lease is None:
             return False
         try:
-            checkpoint, events = await self._workflow.advance(lease.checkpoint, limits=self._limits)
+            limits = lease.limits or self._limits
+            if limits is None:
+                raise RuntimeError("claimed workflow has no persisted autonomy limits")
+            checkpoint, events = await self._workflow.advance(lease.checkpoint, limits=limits)
             await self._store.commit_transition(
                 lease=lease,
                 checkpoint=checkpoint,
@@ -66,6 +73,10 @@ class DurableWorkflowWorker:
             await self._store.release(lease)
             raise
         return True
+
+    async def close(self) -> None:
+        if self._close is not None:
+            await self._close()
 
 
 @dataclass(frozen=True, slots=True)

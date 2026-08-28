@@ -17,7 +17,9 @@ Branch: `live/runtime-composition`
 
 ## Integration seams
 
-1. Agent 2 should pass its PostgreSQL-backed `WorkflowRunStore` to `build_runtime`.
+1. **Integrated on `live/workflow-persistence`:** `build_runtime` now defaults to
+   `PostgreSQLWorkflowRunStore`, and `create_worker` composes the same durable
+   checkpoint queue with per-run autonomy limits.
 2. Agent 4 should pass its persisted guarded `ApprovedExecutionPort` to
    `build_runtime`; remove the default disabled port only after that adapter exists.
 3. Agent 5 can replace `ControlledBearerIdentity` with its verifier while preserving
