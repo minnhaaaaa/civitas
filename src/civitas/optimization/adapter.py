@@ -1,5 +1,6 @@
 """Application-port adapter and JSON-to-solver input translation."""
 
+import hashlib
 from datetime import datetime
 from decimal import Decimal
 from typing import cast
@@ -36,8 +37,16 @@ class OrToolsOptimizer:
     async def solve(self, request: OptimizationRequest) -> OptimizationResult:
         problem, base_unit, money_scale = problem_from_request(request)
         result = self._engine.solve(problem)
+        input_version = hashlib.sha256(request.input_data_version.encode("utf-8")).hexdigest()[:12]
         alternatives = tuple(
-            _to_contract(problem, item, base_unit, money_scale) for item in result.alternatives
+            _to_contract(
+                problem,
+                item,
+                base_unit,
+                money_scale,
+                plan_id=f"{item.alternative_id}-{input_version}",
+            )
+            for item in result.alternatives
         )
         diagnostics: JsonObject = {
             "status": result.status.value,
@@ -179,6 +188,8 @@ def _to_contract(
     alternative: Alternative,
     base_unit: str,
     money_scale: Decimal,
+    *,
+    plan_id: str,
 ) -> CandidatePlan:
     offer_by_id = {item.offer_id: item for item in problem.supplier_offers}
     demand_by_id = {item.demand_id: item for item in problem.demands}
@@ -219,7 +230,7 @@ def _to_contract(
             )
         )
     return CandidatePlan(
-        plan_id=alternative.alternative_id,
+        plan_id=plan_id,
         planning_run_id=problem.planning_run_id,
         feasibility=alternative.feasibility,
         procurement=procurement,

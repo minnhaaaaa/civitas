@@ -191,7 +191,7 @@ class JuryDirectedInvestigator:
             agent_id=agent_id,
         )
         claims = tuple(
-            _claim_from_observation(
+            claim_from_observation(
                 observation,
                 claim_id=self._ids.new_id("claim"),
                 organization_id=self._organization_id,
@@ -322,10 +322,19 @@ class DurableCleanRoomJury:
         )
         expanded_request = request.model_copy(
             update={
-                "supporting_claim_ids": tuple(
-                    dict.fromkeys(
-                        (*request.supporting_claim_ids, *(claim.claim_id for claim in fresh_claims))
+                # Dissent may strengthen an already-linked candidate, but it
+                # cannot manufacture lineage for a plan that supplied none.
+                "supporting_claim_ids": (
+                    tuple(
+                        dict.fromkeys(
+                            (
+                                *request.supporting_claim_ids,
+                                *(claim.claim_id for claim in fresh_claims),
+                            )
+                        )
                     )
+                    if request.supporting_claim_ids
+                    else ()
                 ),
                 "evidence_ids": tuple(
                     dict.fromkeys(
@@ -337,11 +346,19 @@ class DurableCleanRoomJury:
                 ),
             }
         )
+        # PostgreSQL may deduplicate a fresh observation to an existing evidence
+        # identity. Reload its accumulated claim links so repeated fresh reads do
+        # not overwrite earlier SUPPORTS edges in the disposable graph projection.
+        evaluation_snapshot = await self._ledger.load(
+            planning_run_id=request.planning_run_id,
+            claim_ids=expanded_request.supporting_claim_ids,
+            evidence_ids=expanded_request.evidence_ids,
+        )
         return self._evaluator.evaluate(
             expanded_request,
             JuryInputs(
-                claims=tuple(combined_claims),
-                evidence=tuple((*baseline.evidence, *(read.evidence for read in fresh_reads))),
+                claims=evaluation_snapshot.claims,
+                evidence=evaluation_snapshot.evidence,
                 dissent=report,
                 critical_claim_ids=frozenset(expanded_request.supporting_claim_ids),
             ),
@@ -388,7 +405,7 @@ def _tools_for_feedback(feedback: Sequence[str], claims: Sequence[TypedClaim]) -
     return tuple(dict.fromkeys(tools)) or _tools_for_claims(claims)
 
 
-def _claim_from_observation(
+def claim_from_observation(
     observation: OperationalObservation,
     *,
     claim_id: str,
@@ -433,11 +450,11 @@ def _replanning_request(
     claims: Sequence[TypedClaim],
 ) -> OptimizationRequest:
     constraints = dict(request.constraints)
+    claim_ids = [claim.claim_id for claim in claims]
+    evidence_ids = [read.evidence.evidence_id for read in reads]
     annotations = constraints.get("plan_annotations")
+    revised: JsonObject = {}
     if isinstance(annotations, dict):
-        revised: JsonObject = {}
-        claim_ids = [claim.claim_id for claim in claims]
-        evidence_ids = [read.evidence.evidence_id for read in reads]
         for plan_id, raw in annotations.items():
             if not isinstance(plan_id, str) or not isinstance(raw, dict):
                 continue
@@ -448,7 +465,18 @@ def _replanning_request(
                 "claim_ids": list(dict.fromkeys((*existing_claim_ids, *claim_ids))),
                 "evidence_ids": list(dict.fromkeys((*existing_evidence_ids, *evidence_ids))),
             }
-        constraints["plan_annotations"] = revised
+    existing_global = revised.get("__investigation_support__", {})
+    if not isinstance(existing_global, dict):
+        existing_global = {}
+    revised["__investigation_support__"] = {
+        "claim_ids": list(
+            dict.fromkeys((*_string_list(existing_global.get("claim_ids")), *claim_ids))
+        ),
+        "evidence_ids": list(
+            dict.fromkeys((*_string_list(existing_global.get("evidence_ids")), *evidence_ids))
+        ),
+    }
+    constraints["plan_annotations"] = revised
     constraints["investigation_observations"] = [
         observation.model_dump(mode="json") for read in reads for observation in read.observations
     ]

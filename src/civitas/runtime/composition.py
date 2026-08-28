@@ -20,6 +20,7 @@ from civitas.application.live_execution import (
     PersistedApprovalAdapter,
     PersistedApprovedExecutionAdapter,
 )
+from civitas.application.planning_inputs import ProviderPlanningInputAssembler
 from civitas.application.procurement_facade import (
     ApprovedExecutionPort,
     ProcurementApplicationFacade,
@@ -187,6 +188,8 @@ def build_runtime(
     ids = UUIDGenerator()
     optimizer = OrToolsOptimizer()
     investigator: PlanningInvestigator | None = None
+    evidence_ledger: PostgreSQLEvidenceLedger | None = None
+    input_assembler: ProviderPlanningInputAssembler | None = None
     jury: JuryPort
     if provider_planning is None:
         jury = FailClosedJuryPort(ids=ids, clock=clock)
@@ -200,6 +203,7 @@ def build_runtime(
             server_name=provider_planning.server_name,
             organization_id=settings.organization_id,
             clean_room_namespace=provider_planning.dissent_namespace,
+            tool_budget=6,
         )
         investigator = JuryDirectedInvestigator(
             reader=provider_planning.evidence,
@@ -207,6 +211,11 @@ def build_runtime(
             ids=ids,
             server_name=provider_planning.server_name,
             organization_id=settings.organization_id,
+        )
+        input_assembler = ProviderPlanningInputAssembler(
+            reader=provider_planning.evidence,
+            ids=ids,
+            server_name=provider_planning.server_name,
         )
     workflow = ParliamentWorkflow(
         optimizer=optimizer,
@@ -222,6 +231,8 @@ def build_runtime(
         ids=ids,
         clock=clock,
         policy_version=settings.policy_version,
+        input_assembler=input_assembler,
+        evidence_ledger=evidence_ledger,
     )
     approval_service = ApprovalService(
         sessions=database.sessions,

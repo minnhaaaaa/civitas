@@ -330,6 +330,11 @@ class ParliamentWorkflow:
             evidence_ids=_supporting_evidence_ids(checkpoint.parliament),
             policy_version="decision-integrity-v1",
             autonomy_budget_exhausted=self._bounds_exhausted(checkpoint, limits),
+            require_critical_external_support=bool(
+                checkpoint.optimization_request.constraints.get(
+                    "provider_evidence_required", False
+                )
+            ),
         )
         evaluation = await self._jury.evaluate(request)
         if evaluation.state == JuryState.APPROVE:
@@ -441,7 +446,9 @@ class ParliamentWorkflow:
                 "optimization_request": next_request,
                 "optimization_result": None,
                 "parliament": None,
-                "jury_evaluation": checkpoint.jury_evaluation,
+                # The prior Jury decision remains immutable in PostgreSQL, but it
+                # cannot be projected as the decision for a not-yet-selected replan.
+                "jury_evaluation": None,
                 "investigation_backlog": (),
                 "completed_investigation_tasks": (
                     checkpoint.completed_investigation_tasks

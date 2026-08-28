@@ -32,6 +32,7 @@ class JuryRequest(Contract):
     evidence_ids: tuple[str, ...]
     policy_version: str
     autonomy_budget_exhausted: bool = False
+    require_critical_external_support: bool = False
 
 
 class JuryEvaluation(Contract):
