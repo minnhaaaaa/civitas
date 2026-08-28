@@ -18,14 +18,26 @@ from civitas.application.procurement_facade import (
 )
 from civitas.approval.service import ApprovalService
 from civitas.execution.guarded import GuardedExecutionService
-from civitas.mcp_server import InboundMCPServer
+from civitas.identity import (
+    BearerCredential,
+    FixedWindowRateLimiter,
+    HashedBearerVerifier,
+    RateLimiter,
+    RoleAuthorizer,
+)
+from civitas.identity.audit import (
+    AuthenticationAuditSink,
+    NullAuthenticationAuditSink,
+)
+from civitas.identity.context import AuthenticatedPrincipal, derive_operator_context
+from civitas.mcp_server import InboundMCPServer, StaticIdentityProvider
 from civitas.optimization.adapter import OrToolsOptimizer
 from civitas.persistence.database import Database
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
+from civitas.ports.identity import OperatorContext
 from civitas.ports.mcp import MCPPort
 from civitas.runtime.adapters import (
-    ControlledBearerIdentity,
     DisabledExecutionPort,
     FailClosedJuryPort,
     SystemClock,
@@ -58,11 +70,18 @@ class RuntimeApplication:
     workflow_runs: WorkflowRunStore
     executions: ApprovedExecutionPort
     facade: ProcurementApplicationFacade
-    identity: ControlledBearerIdentity
+    identity: HashedBearerVerifier
+    operator_context: OperatorContext
+    rate_limiter: RateLimiter
+    authentication_audit: AuthenticationAuditSink
     mcp_server: InboundMCPServer
 
     def http_app(self) -> Any:
-        app = self.mcp_server.streamable_http_app(self.identity.resolve)
+        app = self.mcp_server.streamable_http_app(
+            verifier=self.identity,
+            rate_limiter=self.rate_limiter,
+            audit_sink=self.authentication_audit,
+        )
         app_with_lifecycle: Any = app
         app_with_lifecycle.add_event_handler("shutdown", self.close)
         return app
@@ -77,6 +96,8 @@ def build_runtime(
     workflow_runs: WorkflowRunStore | None = None,
     executions: ApprovedExecutionPort | None = None,
     provider_execution: ProviderExecutionRuntime | None = None,
+    rate_limiter: RateLimiter | None = None,
+    authentication_audit: AuthenticationAuditSink | None = None,
 ) -> RuntimeApplication:
     """Build the live service, enabling writes only with the complete provider boundary."""
     if executions is not None and provider_execution is not None:
@@ -132,15 +153,37 @@ def build_runtime(
         clock=clock,
         policy_version=settings.policy_version,
     )
-    identity = ControlledBearerIdentity(
-        token=settings.bearer_token,
-        organization_id=settings.organization_id,
-        operator_id=settings.operator_id,
-        subject=settings.operator_subject,
-        roles=settings.operator_roles,
-        clock=clock,
+    operator_context = derive_operator_context(
+        AuthenticatedPrincipal(
+            organization_id=settings.organization_id,
+            operator_id=settings.operator_id,
+            subject=settings.operator_subject,
+            authenticated_at=clock.now(),
+            roles=settings.operator_roles,
+        )
     )
-    server = InboundMCPServer(facade, identity.current_operator)
+    identity = HashedBearerVerifier(
+        (
+            BearerCredential.from_secret(
+                settings.bearer_token,
+                organization_id=settings.organization_id,
+                operator_id=settings.operator_id,
+                subject=settings.operator_subject,
+                roles=settings.operator_roles,
+                expires_at=clock.now() + timedelta(seconds=settings.bearer_ttl_seconds),
+            ),
+        )
+    )
+    effective_rate_limiter = rate_limiter or FixedWindowRateLimiter(
+        requests=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window_seconds,
+    )
+    effective_audit = authentication_audit or NullAuthenticationAuditSink()
+    server = InboundMCPServer(
+        facade,
+        StaticIdentityProvider(operator_context),
+        authorizer=RoleAuthorizer(),
+    )
     return RuntimeApplication(
         settings=settings,
         database=database,
@@ -150,6 +193,9 @@ def build_runtime(
         executions=execution_port,
         facade=facade,
         identity=identity,
+        operator_context=operator_context,
+        rate_limiter=effective_rate_limiter,
+        authentication_audit=effective_audit,
         mcp_server=server,
     )
 

@@ -17,6 +17,7 @@ from civitas.contracts.enums import EvidenceOrigin, ExecutionState, FeasibilityS
 from civitas.contracts.evidence import EvidenceIdentity, EvidenceRecord
 from civitas.contracts.execution import ExecutionRequest
 from civitas.contracts.mcp_product import ApprovedTotals, ExecuteApprovedPlanRequest
+from civitas.contracts.tools import MCPToolCall, MCPToolResult
 from civitas.execution.guarded import GuardedExecutionService, RefreshBundle, _load_plan
 from civitas.integrations import (
     DEFAULT_EXECUTION_POLICY,
@@ -65,6 +66,20 @@ class StaticRefresher:
 
     async def refresh(self, **_: object) -> RefreshBundle:
         return self._bundle
+
+
+class RejectedWriteServer(MockProcurementMCPServer):
+    async def invoke(self, call: MCPToolCall) -> MCPToolResult:
+        if call.tool_name == "create_procurement_order":
+            return MCPToolResult(
+                call_id=call.call_id,
+                succeeded=False,
+                observed_at=datetime(2026, 8, 27, 12, 0, tzinfo=UTC),
+                payload={},
+                error_code="provider_policy_rejected",
+                error_message="provider rejected order",
+            )
+        return await super().invoke(call)
 
 
 class CapturingExecutionConnections:
@@ -299,7 +314,10 @@ async def test_stale_inputs_block_execution(database: Database) -> None:
                 ),
             ),
             observed_unit_prices={offer_key: Decimal("5")},
-            constraints={f"offer:{offer_key}:available": Decimal("10")},
+            constraints={
+                f"offer:{offer_key}:available": Decimal("10"),
+                f"lead:{offer_key}:days": Decimal("0"),
+            },
         )
     )
     service = GuardedExecutionService(
@@ -350,7 +368,10 @@ async def test_plan_changes_return_to_investigation(database: Database) -> None:
             ),
             evidence=(evidence(evidence_id="e-2", claim_id="claim-2", observed_at=now),),
             observed_unit_prices={offer_key: Decimal("5")},
-            constraints={f"offer:{offer_key}:available": Decimal("1")},
+            constraints={
+                f"offer:{offer_key}:available": Decimal("1"),
+                f"lead:{offer_key}:days": Decimal("0"),
+            },
         )
     )
     service = GuardedExecutionService(
@@ -401,7 +422,10 @@ async def test_approved_total_cannot_be_exceeded(database: Database) -> None:
             ),
             evidence=(evidence(evidence_id="e-3", claim_id="claim-3", observed_at=now),),
             observed_unit_prices={offer_key: Decimal("6")},
-            constraints={f"offer:{offer_key}:available": Decimal("10")},
+            constraints={
+                f"offer:{offer_key}:available": Decimal("10"),
+                f"lead:{offer_key}:days": Decimal("0"),
+            },
         )
     )
     service = GuardedExecutionService(
@@ -452,7 +476,10 @@ async def test_duplicate_requests_do_not_duplicate_orders(database: Database) ->
             ),
             evidence=(evidence(evidence_id="e-4", claim_id="claim-4", observed_at=now),),
             observed_unit_prices={offer_key: Decimal("5")},
-            constraints={f"offer:{offer_key}:available": Decimal("10")},
+            constraints={
+                f"offer:{offer_key}:available": Decimal("10"),
+                f"lead:{offer_key}:days": Decimal("0"),
+            },
         )
     )
     server = MockProcurementMCPServer()
@@ -588,7 +615,10 @@ async def test_idempotency_key_cannot_be_reused_for_different_action(database: D
                     ),
                 ),
                 observed_unit_prices={offer_key: Decimal("5")},
-                constraints={f"offer:{offer_key}:available": Decimal("10")},
+                constraints={
+                    f"offer:{offer_key}:available": Decimal("10"),
+                    f"lead:{offer_key}:days": Decimal("0"),
+                },
             )
         ),
     )
@@ -685,7 +715,10 @@ async def test_persisted_receipt_is_bound_to_execution_and_write_ledger(
                     ),
                 ),
                 observed_unit_prices={offer_key: Decimal("5")},
-                constraints={f"offer:{offer_key}:available": Decimal("10")},
+                constraints={
+                    f"offer:{offer_key}:available": Decimal("10"),
+                    f"lead:{offer_key}:days": Decimal("0"),
+                },
             )
         ),
     )
@@ -825,7 +858,10 @@ async def test_product_adapter_builds_provider_connection_from_persisted_receipt
                     ),
                 ),
                 observed_unit_prices={offer_key: Decimal("5")},
-                constraints={f"offer:{offer_key}:available": Decimal("10")},
+                constraints={
+                    f"offer:{offer_key}:available": Decimal("10"),
+                    f"lead:{offer_key}:days": Decimal("0"),
+                },
             )
         ),
     )
@@ -850,3 +886,66 @@ async def test_product_adapter_builds_provider_connection_from_persisted_receipt
     assert len(connections.contexts) == 1
     assert connections.contexts[0].approval_receipt_id == receipt_id
     assert connections.contexts[0].approved_plan_hash == result.selected_plan_hash
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_unsuccessful_provider_result_is_never_recorded_as_success(
+    database: Database,
+) -> None:
+    state = await seed_execution_state(database)
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    offer_key = f"{state[6]}:{state[4]}:{state[5]}"
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=RejectedWriteServer(),
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        refresher=StaticRefresher(
+            RefreshBundle(
+                claims=(
+                    claim(
+                        claim_id="claim-provider-rejection",
+                        predicate="unit_price",
+                        observed_at=now,
+                        organization_id=state[3],
+                        sku_id=state[4],
+                        warehouse_id=state[5],
+                    ),
+                ),
+                evidence=(
+                    evidence(
+                        evidence_id="e-provider-rejection",
+                        claim_id="claim-provider-rejection",
+                        observed_at=now,
+                    ),
+                ),
+                observed_unit_prices={offer_key: Decimal("5")},
+                constraints={
+                    f"offer:{offer_key}:available": Decimal("10"),
+                    f"lead:{offer_key}:days": Decimal("0"),
+                },
+            )
+        ),
+    )
+    request = execution_request(
+        planning_run_id=state[0],
+        plan_id=state[1],
+        jury_id=state[2],
+        key=identifier("provider-rejection"),
+    )
+
+    outcome = await service.execute(request)
+
+    assert outcome.result.state is ExecutionState.COMPENSATION_REQUIRED
+    assert outcome.result.failure_code == "provider_write_failed"
+    async with database.sessions() as session:
+        audit = await session.get(ExecutionAuditModel, request.execution_id)
+        write = await session.scalar(
+            select(ProviderWriteModel).where(
+                ProviderWriteModel.execution_id == request.execution_id
+            )
+        )
+    assert audit is not None
+    assert audit.state == ExecutionState.COMPENSATION_REQUIRED.value
+    assert write is not None
+    assert write.state == ExecutionState.COMPENSATION_REQUIRED.value

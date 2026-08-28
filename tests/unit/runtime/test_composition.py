@@ -79,6 +79,7 @@ async def test_composition_wires_authenticated_mcp_and_rejects_wrong_token() -> 
         assert context.organization_id == "org-1"
         assert context.operator_id == "operator-1"
         assert context.authenticated_at.tzinfo is UTC
+        assert runtime.mcp_server._authorizer is not None
     finally:
         await runtime.close()
 
@@ -97,7 +98,7 @@ async def test_unconfigured_provider_execution_fails_closed() -> None:
         result = await runtime.mcp_server.dispatch(
             "execute_approved_plan",
             {"receipt_id": "approval-1", "idempotency_key": "attempt-1"},
-            context=runtime.identity.context(),
+            context=runtime.operator_context,
         )
         assert result["code"] == "rejected_execution"
         assert "not configured" in str(result["message"])

@@ -29,8 +29,9 @@ docker compose -f deploy/compose.local.yaml --profile mcp up --build
 
 The MCP server and durable worker use the production composition and PostgreSQL
 checkpoint queue. The simulated provider remains an explicit offline test
-boundary and never authorizes real procurement. Provider writes continue to
-fail closed until the guarded approval/execution workstream is integrated.
+boundary and never authorizes real procurement. Provider writes fail closed
+unless the runtime is given the complete provider read and approval-bound
+execution connection dependencies.
 
 Worker leases renew while a transition is running. Configure
 `CIVITAS_WORKER_LEASE_SECONDS` for the expected provider latency and
@@ -62,9 +63,11 @@ docker compose \
   --profile mcp up -d
 ```
 
-Terminate TLS at a reverse proxy or load balancer, forward only authenticated
-HTTPS traffic to the Streamable HTTP MCP endpoint, and configure an OAuth issuer
-or a high-entropy bearer-token verifier there and in the inbound server. STDI/O
+Terminate TLS at a reverse proxy or load balancer and forward only authenticated
+HTTPS traffic to the Streamable HTTP MCP endpoint. The included high-entropy
+bearer verifier supports expiry, revocation-ready credential records, roles,
+correlation, and local throttling; configure an OAuth/JWT verifier and shared
+rate limiter for remote multi-tenant service. STDI/O
 is for local Codex use and must not be Internet-exposed. Authenticate the
 inbound Codex connection separately from each outbound provider connection.
 
@@ -74,6 +77,10 @@ Do not place them in images, Compose files, command lines, source control, MCP
 responses, or logs. Rotate one credential at a time: deploy the replacement,
 verify authenticated health/readiness and one read-only provider call, revoke the
 old secret, then retain only redacted audit references.
+
+`CIVITAS_BEARER_TTL_SECONDS`, `CIVITAS_RATE_LIMIT_REQUESTS`, and
+`CIVITAS_RATE_LIMIT_WINDOW_SECONDS` bound the included bearer deployment. The
+defaults are 3600 seconds, 120 requests, and 60 seconds respectively.
 
 ## Health, readiness, and shutdown
 

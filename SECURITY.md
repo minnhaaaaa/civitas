@@ -49,7 +49,11 @@ Model output is treated as untrusted: responses are capped at 1 MiB, parsed as J
 
 ## Known integration limitations
 
-- The Codex-facing inbound MCP adapter and transport-neutral product facade are implemented and covered by deterministic end-to-end contract tests. A deployable composition root that wires them to PostgreSQL workflow persistence, the durable worker, production identity resolution, and a real provider is not yet supplied. The current runnable product surface remains the offline demonstration API and optional React viewer.
+- The deployable composition root now wires the inbound MCP adapter, durable
+  PostgreSQL workflow, worker, hashed bearer identity, persisted approvals, and
+  guarded execution. A real deployment must still inject provider credential
+  resolution, transport construction, onboarding registration, and the execution
+  connection factory; missing provider execution dependencies fail closed.
 
 - The generic Parliament workflow currently uses deterministic role implementations. The Groq adapter is contract-tested but is not yet composed into those roles for explanatory challenge text.
 - The generic investigation transition accepts a replanner callback; the demo performs real read-only MCP investigation around that transition. A production composition still needs a durable investigation worker.
@@ -57,6 +61,10 @@ Model output is treated as untrusted: responses are capped at 1 MiB, parsed as J
 - Generic repositories are trusted migration/import primitives. Authenticated
   paths use the tenant-bound repository factory, which scopes direct rows by
   organization and scopes child inputs through their owning planning run.
-- The guarded API factory is tested but is not the same app as the unauthenticated offline demo factory. Deployment composition and operator identity remain environment-specific.
+- The environment-driven runtime uses a rotation-capable opaque bearer verifier. Remote
+  multi-tenant deployments still require an OAuth/JWT verifier and a shared
+  distributed rate-limit implementation.
 
-These limitations mean the offline demonstration is end-to-end, but the repository is not yet a production-ready autonomous procurement deployment.
+These limitations mean Agents 1–5 form a guarded live foundation, but durable
+investigation/Jury evidence integration and deployment-specific providers remain
+required before production autonomous procurement.

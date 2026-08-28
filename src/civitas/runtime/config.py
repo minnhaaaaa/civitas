@@ -27,6 +27,9 @@ class RuntimeSettings:
     worker_id: str | None = None
     worker_lease_seconds: int = 60
     worker_max_attempts: int = 5
+    bearer_ttl_seconds: int = 3600
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
 
     def __post_init__(self) -> None:
         if not self.database_url.startswith(
@@ -49,6 +52,12 @@ class RuntimeSettings:
             raise SettingsError("CIVITAS_WORKER_LEASE_SECONDS must be between 5 and 3600")
         if not 1 <= self.worker_max_attempts <= 100:
             raise SettingsError("CIVITAS_WORKER_MAX_ATTEMPTS must be between 1 and 100")
+        if not 60 <= self.bearer_ttl_seconds <= 86_400:
+            raise SettingsError("CIVITAS_BEARER_TTL_SECONDS must be between 60 and 86400")
+        if not 1 <= self.rate_limit_requests <= 100_000:
+            raise SettingsError("CIVITAS_RATE_LIMIT_REQUESTS must be between 1 and 100000")
+        if not 1 <= self.rate_limit_window_seconds <= 3600:
+            raise SettingsError("CIVITAS_RATE_LIMIT_WINDOW_SECONDS must be between 1 and 3600")
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> RuntimeSettings:
@@ -73,6 +82,9 @@ class RuntimeSettings:
             worker_id=values.get("CIVITAS_WORKER_ID"),
             worker_lease_seconds=_integer(values, "CIVITAS_WORKER_LEASE_SECONDS", 60),
             worker_max_attempts=_integer(values, "CIVITAS_WORKER_MAX_ATTEMPTS", 5),
+            bearer_ttl_seconds=_integer(values, "CIVITAS_BEARER_TTL_SECONDS", 3600),
+            rate_limit_requests=_integer(values, "CIVITAS_RATE_LIMIT_REQUESTS", 120),
+            rate_limit_window_seconds=_integer(values, "CIVITAS_RATE_LIMIT_WINDOW_SECONDS", 60),
         )
 
 

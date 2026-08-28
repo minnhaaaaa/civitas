@@ -296,7 +296,7 @@ async def test_agent_one_runtime_uses_postgresql_workflow_store_by_default(
     )
     try:
         response = await runtime.facade.plan_procurement_goal(
-            runtime.identity.context(),
+            runtime.operator_context,
             PlanProcurementGoalRequest(goal=_goal(sku_id, warehouse_id)),
         )
         assert response.run.organization_id == organization_id

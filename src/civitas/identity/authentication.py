@@ -125,6 +125,10 @@ class HashedBearerVerifier:
         """Retain compatibility with the original MCP resolver callback."""
         return await self.verify(token)
 
+    async def resolve(self, token: str) -> OperatorContext | None:
+        """Compatibility alias for composition roots using the resolver vocabulary."""
+        return await self.verify(token)
+
 
 def _digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()

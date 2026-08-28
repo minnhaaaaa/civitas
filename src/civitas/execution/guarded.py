@@ -515,7 +515,7 @@ class GuardedExecutionService:
 
             inventory = InventoryService(session)
             try:
-                for line in plan.distribution:
+                for line_index, line in enumerate(plan.distribution):
                     await inventory.reserve_fefo(
                         organization_id=planning_run.organization_id,
                         sku_id=line.sku_id,
@@ -523,8 +523,8 @@ class GuardedExecutionService:
                         quantity=line.quantity.value,
                         occurred_at=self._clock.now(),
                         business_reference=request.execution_id,
-                        idempotency_key=(
-                            f"{request.idempotency_key}:{line.sku_id}:{line.source_warehouse_id}"
+                        idempotency_key=_distribution_reservation_key(
+                            request.idempotency_key, line_index, line
                         ),
                     )
             except (DuplicateReservation, InsufficientInventory) as error:
@@ -590,6 +590,9 @@ class GuardedExecutionService:
                             idempotency_key=write_key,
                         )
                     )
+                    if not result.succeeded:
+                        error_code = result.error_code or "provider_rejected_write"
+                        raise RuntimeError(f"provider write failed: {error_code}")
                     order_id = result.payload.get("order_id")
                     if isinstance(order_id, str):
                         external_references.append(order_id)
@@ -697,8 +700,12 @@ class GuardedExecutionService:
             )
             unit_price = refresh.observed_unit_prices.get(key)
             available = refresh.constraints.get(f"offer:{key}:available", Decimal("0"))
-            if unit_price is None or available < line.quantity.value:
+            lead_days = refresh.constraints.get(f"lead:{key}:days")
+            if unit_price is None or available < line.quantity.value or lead_days is None:
                 required.append(f"Regenerate solver plan for supplier offer {key}.")
+                continue
+            if lead_days < 0 or now + timedelta(days=float(lead_days)) > line.arrival_bucket_start:
+                required.append(f"Regenerate solver plan for supplier lead time {key}.")
                 continue
             refreshed_total += unit_price * line.quantity.value
         for distribution_line in plan.distribution:
@@ -1005,6 +1012,16 @@ def _group_procurement_lines(plan: CandidatePlan) -> dict[str, list[dict[str, An
             }
         )
     return grouped
+
+
+def _distribution_reservation_key(
+    execution_key: str, line_index: int, line: DistributionLine
+) -> str:
+    """Bind a retry-safe reservation key to one exact distribution line."""
+    return (
+        f"{execution_key}:distribution:{line_index}:{line.sku_id}:"
+        f"{line.source_warehouse_id}:{line.destination_warehouse_id}"
+    )
 
 
 def _offer_key(record: Mapping[str, Any]) -> str:
