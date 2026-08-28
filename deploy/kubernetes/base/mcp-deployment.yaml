@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: civitas-mcp
+  labels:
+    app.kubernetes.io/name: civitas-mcp
+    app.kubernetes.io/component: mcp-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: civitas-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: civitas-mcp
+        app.kubernetes.io/component: mcp-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8001"
+    spec:
+      serviceAccountName: civitas
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migration-gate
+          image: civitas:0.1.0
+          args: ["alembic", "current", "--check-heads"]
+          envFrom:
+            - configMapRef: {name: civitas-runtime}
+            - secretRef: {name: civitas-runtime-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      containers:
+        - name: mcp-server
+          image: civitas:0.1.0
+          imagePullPolicy: IfNotPresent
+          args: ["civitas-mcp"]
+          ports:
+            - name: http
+              containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: civitas-runtime
+            - secretRef:
+                name: civitas-runtime-secrets
+          env:
+            - name: CIVITAS_SERVICE_NAME
+              value: civitas-mcp
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

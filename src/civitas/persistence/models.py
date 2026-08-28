@@ -534,6 +534,23 @@ class WorkflowCheckpointModel(TimestampMixin, Base):
     )
 
 
+class ServiceHeartbeatModel(Base):
+    """Operational process presence; never used as execution authority."""
+
+    __tablename__ = "service_heartbeats"
+    __table_args__ = (
+        CheckConstraint("service_kind IN ('mcp-server', 'worker')", name="ck_heartbeat_kind"),
+        CheckConstraint("state IN ('starting', 'running', 'stopping')", name="ck_heartbeat_state"),
+        Index("ix_service_heartbeats_kind_seen", "service_kind", "last_seen_at"),
+    )
+    service_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    service_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
 class ExecutionAuditModel(TimestampMixin, Base):
     __tablename__ = "execution_audits"
     __table_args__ = (

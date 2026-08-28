@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -35,6 +36,8 @@ class DurableWorkflowWorker:
         max_attempts: int = 5,
         heartbeat_interval: timedelta | None = None,
         close: Callable[[], Awaitable[None]] | None = None,
+        heartbeat: Callable[[], Awaitable[None]] | None = None,
+        stopping: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if not worker_id.strip() or lease_for <= timedelta(0):
             raise ValueError("worker_id and a positive lease duration are required")
@@ -52,6 +55,9 @@ class DurableWorkflowWorker:
         self._max_attempts = max_attempts
         self._heartbeat_interval = renewal_interval
         self._close = close
+        self._process_heartbeat = heartbeat
+        self._stopping = stopping
+        self._heartbeat_started = False
 
     async def enqueue(
         self, checkpoint: WorkflowCheckpoint, *, limits: WorkflowLimits | None = None
@@ -123,6 +129,9 @@ class DurableWorkflowWorker:
                 now=self._clock.now(),
                 lease_for=self._lease_for,
             )
+            if self._process_heartbeat is not None:
+                await self._process_heartbeat()
+                self._heartbeat_started = True
 
     async def _escalate_exhausted(self, lease: WorkflowLease, error: Exception) -> None:
         now = self._clock.now()
@@ -156,8 +165,17 @@ class DurableWorkflowWorker:
         )
 
     async def close(self) -> None:
+        if self._heartbeat_started and self._stopping is not None:
+            # A final observability write must never prevent graceful resource cleanup.
+            with suppress(Exception):
+                await self._stopping()
         if self._close is not None:
             await self._close()
+
+    async def heartbeat(self) -> None:
+        if self._process_heartbeat is not None:
+            await self._process_heartbeat()
+            self._heartbeat_started = True
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,6 +30,11 @@ services:
       CIVITAS_ORGANIZATION_ID: ${CIVITAS_ORGANIZATION_ID:?bind an organization}
       CIVITAS_OPERATOR_ID: ${CIVITAS_OPERATOR_ID:?bind an operator}
       CIVITAS_LOG_FORMAT: json
+      CIVITAS_ENV: ${CIVITAS_ENV:-development}
+      CIVITAS_SERVICE_NAME: ${CIVITAS_SERVICE_NAME:-civitas-mcp}
+      CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-false}
+      CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:-}
+      CIVITAS_REQUIRE_WORKER_READY: ${CIVITAS_REQUIRE_WORKER_READY:-false}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -37,6 +42,7 @@ services:
     restart: "no"
 
   api:
+    profiles: ["demo"]
     image: civitas:local
     environment: *civitas-environment
     command: ["uvicorn", "civitas.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
@@ -54,6 +60,8 @@ services:
     init: true
     stop_grace_period: 30s
     restart: unless-stopped
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
   # Durable workflow worker; execution side effects remain in the guarded execution service.
   worker:
@@ -63,14 +71,24 @@ services:
     environment:
       <<: *civitas-environment
       CIVITAS_WORKER_FACTORY: civitas.runtime:create_worker
+      CIVITAS_SERVICE_NAME: civitas-worker
+      CIVITAS_WORKER_ID: ${CIVITAS_WORKER_ID:-worker-local-1}
       CIVITAS_WORKER_LEASE_SECONDS: ${CIVITAS_WORKER_LEASE_SECONDS:-60}
       CIVITAS_WORKER_MAX_ATTEMPTS: ${CIVITAS_WORKER_MAX_ATTEMPTS:-5}
     depends_on:
       migrations:
         condition: service_completed_successfully
     init: true
+    healthcheck:
+      test: ["CMD", "python", "scripts/worker_healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     stop_grace_period: 45s
     restart: unless-stopped
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
   # The authenticated Streamable HTTP MCP server supplied by Agent 1. Its
   # runtime command is explicit so deployment never invents an alternate path.
@@ -86,20 +104,34 @@ services:
     depends_on:
       migrations:
         condition: service_completed_successfully
+      worker:
+        condition: service_healthy
     init: true
+    healthcheck:
+      test: ["CMD", "python", "scripts/http_healthcheck.py", "http://127.0.0.1:8001/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
     stop_grace_period: 30s
     restart: unless-stopped
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
   # This is intentionally separate from the application trust boundary. The
   # provider simulator is for deterministic local MCP integration only.
   simulated-provider:
-    profiles: ["mcp"]
+    profiles: ["provider-simulator"]
     image: civitas:local
-    environment: *civitas-environment
+    environment:
+      <<: *civitas-environment
+      CIVITAS_SIMULATED_PROVIDER_COMMAND: ${CIVITAS_SIMULATED_PROVIDER_COMMAND:-}
     command: ["python", "scripts/run_simulated_provider.py"]
     init: true
     stop_grace_period: 15s
     restart: unless-stopped
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
 volumes:
   civitas-postgres-data:

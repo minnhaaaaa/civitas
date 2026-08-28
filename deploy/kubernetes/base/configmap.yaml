@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: civitas-runtime
+data:
+  CIVITAS_ENV: production
+  CIVITAS_LOG_FORMAT: json
+  CIVITAS_MCP_HOST: 0.0.0.0
+  CIVITAS_MCP_PORT: "8001"
+  CIVITAS_MCP_TRANSPORT: streamable-http
+  CIVITAS_LIVE_PROVIDER_REQUIRED: "true"
+  CIVITAS_REQUIRE_WORKER_READY: "true"
+  CIVITAS_WORKER_READINESS_SECONDS: "120"
+  CIVITAS_HEARTBEAT_INTERVAL_SECONDS: "10"
+  CIVITAS_METRICS_ENABLED: "true"
+  # The deployed image must contain this organization-owned provider bootstrap.
+  CIVITAS_PROVIDER_FACTORY: provider_runtime.bootstrap:create_dependencies

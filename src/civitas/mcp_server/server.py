@@ -57,6 +57,7 @@ _request_identity: ContextVar[OperatorContext | None] = ContextVar(
     "civitas_mcp_request_identity", default=None
 )
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_OPERATIONAL_PATHS = frozenset({"/health/live", "/health/ready", "/metrics"})
 
 
 class StaticIdentityProvider:
@@ -89,6 +90,8 @@ class BearerIdentityMiddleware(BaseHTTPMiddleware):
         self._audit_sink = audit_sink or NullAuthenticationAuditSink()
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
+        if request.method == "GET" and request.url.path in _OPERATIONAL_PATHS:
+            return cast(Response, await call_next(request))
         correlation_id = request.headers.get("x-correlation-id") or secrets.token_urlsafe(18)
         if _CORRELATION_ID.fullmatch(correlation_id) is None:
             return JSONResponse({"error": "invalid_correlation_id"}, status_code=400)

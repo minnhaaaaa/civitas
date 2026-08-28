@@ -20,15 +20,16 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
 COPY tools ./tools
-COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
+COPY scripts ./scripts
 
 RUN uv sync --frozen --no-dev \
     && chmod 0555 ./scripts/docker-entrypoint.sh \
+    && chmod 0444 ./scripts/*.py \
     && chown -R civitas:civitas /app
 
 USER civitas
 
-EXPOSE 8000
+EXPOSE 8000 8001
 
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
 CMD ["uvicorn", "civitas.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
