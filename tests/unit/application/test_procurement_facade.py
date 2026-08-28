@@ -200,6 +200,10 @@ def _snapshot() -> WorkflowRunSnapshot:
 
 @pytest.mark.asyncio
 async def test_facade_starts_once_and_returns_deterministic_summary_and_progress() -> None:
+    class Links:
+        async def issue(self, organization_id: str, run_id: str, plan_id: str, cursor: int) -> str:
+            return f"/audit/{organization_id}/{run_id}/{plan_id}?cursor={cursor}"
+
     runs = Runs(_snapshot())
     facade = ProcurementApplicationFacade(
         workflow_runs=runs,
@@ -207,7 +211,7 @@ async def test_facade_starts_once_and_returns_deterministic_summary_and_progress
         executions=Executions(),
         ids=IDs(),
         clock=Clock(),
-        audit_link_for=lambda run, cursor: f"/audit/{run}?cursor={cursor}",
+        audit_links=Links(),
     )
 
     started = await facade.plan_procurement_goal(
@@ -232,7 +236,7 @@ async def test_facade_starts_once_and_returns_deterministic_summary_and_progress
             await facade.get_decision_summary(_context(), GetDecisionSummaryRequest(run_id="run-1"))
         ).selected_plan_hash
     )
-    assert summary.audit_link == "/audit/run-1?cursor=2"
+    assert summary.audit_link == "/audit/org-1/run-1/plan-1?cursor=2"
 
 
 @pytest.mark.asyncio

@@ -34,8 +34,9 @@ def test_backup_and_restore_assets_are_guarded() -> None:
 
 
 def test_runtime_readiness_revision_matches_alembic_head() -> None:
-    migration = ROOT / f"alembic/versions/{EXPECTED_DATABASE_REVISION}_add_service_heartbeats.py"
-    assert migration.exists()
+    migrations = tuple((ROOT / "alembic/versions").glob(f"{EXPECTED_DATABASE_REVISION}_*.py"))
+    assert len(migrations) == 1
+    migration = migrations[0]
     assert f'revision: str = "{EXPECTED_DATABASE_REVISION}"' in migration.read_text(
         encoding="utf-8"
     )

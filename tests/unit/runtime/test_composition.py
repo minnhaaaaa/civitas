@@ -97,6 +97,34 @@ async def test_composition_wires_authenticated_mcp_and_rejects_wrong_token() -> 
 
 
 @pytest.mark.asyncio
+async def test_composition_adds_only_get_audit_resources_when_enabled() -> None:
+    runtime = build_runtime(
+        replace(
+            _settings(),
+            audit_viewer_enabled=True,
+            audit_viewer_base_url="http://audit.example",
+            audit_link_secret="a" * 32,
+        )
+    )
+    try:
+        assert runtime.audit_viewer is not None
+        routes = {
+            route.path: route.methods
+            for route in runtime.http_app().routes
+            if route.path.startswith("/api/audit/")
+        }
+        assert set(routes) == {
+            "/api/audit/{token:str}/manifest",
+            "/api/audit/{token:str}/events",
+            "/api/audit/{token:str}/evidence",
+            "/api/audit/{token:str}/execution",
+        }
+        assert all(methods == {"GET", "HEAD"} for methods in routes.values())
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_worker_composition_uses_durable_run_limits_and_closes_database() -> None:
     worker = build_worker(_settings())
     assert worker is not None

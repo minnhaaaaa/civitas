@@ -1697,10 +1697,22 @@ select:disabled {
   }
 }
 
-/* Optional audit viewer: a deliberately quiet case-file layout. */
+/* Optional audit viewer: a cool chain-of-custody ledger, not an action surface. */
 .audit-viewer {
+  --forest: #112c39;
+  --forest-deep: #081d28;
+  --forest-soft: #476472;
+  --moss: #2d7185;
+  --cream: #edf2f1;
+  --cream-2: #dfe8e7;
+  --signal: #7dd6c5;
+  --warning: #f1b24b;
+  --coral: #e56b55;
+  --line: rgba(17, 44, 57, 0.22);
   min-height: 100vh;
-  background: var(--cream);
+  background:
+    linear-gradient(90deg, transparent 0 35px, rgba(22, 93, 120, 0.08) 35px 36px, transparent 36px),
+    var(--cream);
   color: var(--forest);
 }
 
@@ -1736,6 +1748,49 @@ select:disabled {
 
 .audit-main {
   padding-block: clamp(42px, 7vw, 88px);
+}
+
+.audit-custody {
+  position: relative;
+  display: grid;
+  grid-template-columns: 150px minmax(220px, 1fr) minmax(220px, 1.2fr) auto;
+  gap: 20px;
+  align-items: center;
+  padding: 18px 22px 18px 30px;
+  margin-bottom: 24px;
+  border: 1px solid var(--forest);
+  background: #dcebea;
+  box-shadow: 7px 7px 0 rgba(17, 44, 57, 0.12);
+}
+.audit-custody::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 10px;
+  width: 7px;
+  background: repeating-linear-gradient(180deg, var(--forest) 0 7px, transparent 7px 13px);
+}
+.audit-custody span,
+.audit-custody small,
+.audit-load-more {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.audit-custody span {
+  color: var(--forest-soft);
+}
+.audit-custody strong {
+  font-weight: 650;
+}
+.audit-custody p {
+  margin: 0;
+  line-height: 1.45;
+}
+.audit-custody small {
+  color: var(--forest-soft);
 }
 
 .audit-masthead {
@@ -1836,12 +1891,29 @@ select:disabled {
 .audit-section h2 {
   font-size: clamp(42px, 5.4vw, 76px);
 }
+.audit-load-more {
+  flex: 0 0 auto;
+  padding: 11px 14px;
+  border: 1px solid var(--forest);
+  background: transparent;
+  color: var(--forest);
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+.audit-load-more:hover,
+.audit-load-more:focus-visible {
+  background: var(--forest);
+  color: var(--cream);
+  transform: translate(-2px, -2px);
+}
 .audit-graph {
   height: 520px;
   margin-top: 28px;
   overflow: hidden;
   border: 1px solid var(--forest);
-  background: #e9eee7;
+  background: #dfe9e9;
 }
 .audit-graph-node {
   width: 178px;
@@ -1869,6 +1941,12 @@ select:disabled {
 }
 .audit-graph-node--decision {
   background: var(--signal);
+}
+.audit-graph-node--source {
+  border-left: 7px solid #165d78;
+}
+.audit-graph-node--claim {
+  border-left: 7px solid var(--warning);
 }
 .audit-caption {
   margin: 13px 0 0;
@@ -1995,6 +2073,14 @@ select:disabled {
   .audit-masthead,
   .audit-grid {
     grid-template-columns: 1fr;
+  }
+  .audit-custody {
+    grid-template-columns: 1fr;
+    padding-left: 30px;
+  }
+  .audit-section header {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .audit-overview,
   .audit-receipt ol {

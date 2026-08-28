@@ -41,6 +41,10 @@ class RuntimeSettings:
     worker_readiness_seconds: int = 120
     heartbeat_interval_seconds: int = 10
     metrics_enabled: bool = True
+    audit_viewer_enabled: bool = False
+    audit_viewer_base_url: str | None = None
+    audit_link_secret: str | None = None
+    audit_link_ttl_seconds: int = 900
 
     def __post_init__(self) -> None:
         if not self.database_url.startswith(
@@ -85,6 +89,23 @@ class RuntimeSettings:
             )
         if self.provider_factory is not None and ":" not in self.provider_factory:
             raise SettingsError("CIVITAS_PROVIDER_FACTORY must use module:callable syntax")
+        if not 60 <= self.audit_link_ttl_seconds <= 604_800:
+            raise SettingsError("CIVITAS_AUDIT_LINK_TTL_SECONDS must be between 60 and 604800")
+        if self.audit_viewer_enabled:
+            if self.audit_viewer_base_url is None or self.audit_link_secret is None:
+                raise SettingsError(
+                    "audit viewer requires CIVITAS_AUDIT_VIEWER_BASE_URL and "
+                    "CIVITAS_AUDIT_LINK_SECRET"
+                )
+            parsed_audit_url = urlsplit(self.audit_viewer_base_url)
+            if parsed_audit_url.scheme not in {"http", "https"} or not parsed_audit_url.netloc:
+                raise SettingsError("CIVITAS_AUDIT_VIEWER_BASE_URL must be an absolute HTTP URL")
+            if parsed_audit_url.query or parsed_audit_url.fragment:
+                raise SettingsError(
+                    "CIVITAS_AUDIT_VIEWER_BASE_URL cannot contain query or fragment"
+                )
+            if len(self.audit_link_secret.encode("utf-8")) < 32:
+                raise SettingsError("CIVITAS_AUDIT_LINK_SECRET must contain at least 32 bytes")
         if self.environment == "production":
             self._validate_production()
 
@@ -106,6 +127,13 @@ class RuntimeSettings:
             raise SettingsError("production bearer token is a known development value")
         if self.approval_secret_pepper.casefold() in development_secrets:
             raise SettingsError("production approval secret is a known development value")
+        if self.audit_viewer_enabled:
+            assert self.audit_viewer_base_url is not None
+            assert self.audit_link_secret is not None
+            if urlsplit(self.audit_viewer_base_url).scheme != "https":
+                raise SettingsError("production audit viewer links require HTTPS")
+            if self.audit_link_secret in {self.bearer_token, self.approval_secret_pepper}:
+                raise SettingsError("audit, bearer, and approval secrets must be independent")
         parsed = urlsplit(self.database_url)
         if parsed.password is not None and parsed.password.casefold() in weak_values:
             raise SettingsError("production database URL contains a development password")
@@ -145,6 +173,10 @@ class RuntimeSettings:
             worker_readiness_seconds=_integer(values, "CIVITAS_WORKER_READINESS_SECONDS", 120),
             heartbeat_interval_seconds=_integer(values, "CIVITAS_HEARTBEAT_INTERVAL_SECONDS", 10),
             metrics_enabled=_boolean(values, "CIVITAS_METRICS_ENABLED", True),
+            audit_viewer_enabled=_boolean(values, "CIVITAS_AUDIT_VIEWER_ENABLED", False),
+            audit_viewer_base_url=values.get("CIVITAS_AUDIT_VIEWER_BASE_URL") or None,
+            audit_link_secret=_optional_secret(values, "CIVITAS_AUDIT_LINK_SECRET"),
+            audit_link_ttl_seconds=_integer(values, "CIVITAS_AUDIT_LINK_TTL_SECONDS", 900),
         )
 
 
@@ -172,6 +204,14 @@ def _secret(values: dict[str, str] | os._Environ[str], name: str) -> str:
     if not value:
         raise SettingsError(f"{name}_FILE is empty")
     return value
+
+
+def _optional_secret(values: dict[str, str] | os._Environ[str], name: str) -> str | None:
+    direct = values.get(name, "").strip()
+    file_name = values.get(f"{name}_FILE", "").strip()
+    if not direct and not file_name:
+        return None
+    return _secret(values, name)
 
 
 def _integer(values: dict[str, str] | os._Environ[str], name: str, default: int) -> int:

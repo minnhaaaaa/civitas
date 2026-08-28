@@ -16,7 +16,7 @@ from civitas.ports.clock import Clock
 from civitas.runtime.config import RuntimeSettings
 from civitas.runtime.observability import MetricsRegistry, OperationalTelemetryMiddleware
 
-EXPECTED_DATABASE_REVISION = "c72e4a8b901d"
+EXPECTED_DATABASE_REVISION = "e84b7c9d103f"
 
 
 class RuntimeHealth:

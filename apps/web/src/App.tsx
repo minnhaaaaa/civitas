@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
   Background,
   MarkerType,
@@ -10,25 +10,22 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type {
-  AuditViewSnapshot,
+  AuditEventItem,
+  AuditEvidenceItem,
+  AuditExecutionEventItem,
+  AuditManifest,
+  AuditPage,
   EvidenceGraphNodeData,
-  JuryCycleSnapshot,
-  WorkflowEvent,
 } from "./contracts";
-import { createMockAuditSnapshot } from "./mockPlayback";
 
-const PUBLIC_REFERENCE_PATTERN = /^[A-Za-z0-9_-]{12,128}$/;
-type AuditRoute = { publicReference: string; runId: string; planId: string; cursor: number };
+const SIGNED_REFERENCE_PATTERN = /^[A-Za-z0-9_-]{24,128}\.[A-Za-z0-9_-]{40,64}$/;
+const PAGE_SIZE = 25;
 
-function readAuditRoute(location: Location): AuditRoute | null {
+function readAuditReference(location: Location): string | null {
   const match = /^\/audit\/([^/]+)\/?$/.exec(location.pathname);
-  if (!match || !PUBLIC_REFERENCE_PATTERN.test(match[1]!)) return null;
-  const query = new URLSearchParams(location.search);
-  const runId = query.get("run");
-  const planId = query.get("plan");
-  const cursor = Number(query.get("cursor") ?? "0");
-  if (!runId || !planId || !Number.isSafeInteger(cursor) || cursor < 0) return null;
-  return { publicReference: match[1]!, runId, planId, cursor };
+  if (!match) return null;
+  const reference = decodeURIComponent(match[1]!);
+  return SIGNED_REFERENCE_PATTERN.test(reference) ? reference : null;
 }
 
 function eventLabel(eventType: string): string {
@@ -45,6 +42,14 @@ function formatClock(isoTimestamp: string): string {
   }).format(new Date(isoTimestamp));
 }
 
+function formatDate(isoTimestamp: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(isoTimestamp));
+}
+
 function EvidenceNode({ data }: NodeProps<Node<EvidenceGraphNodeData>>) {
   return (
     <div className={`audit-graph-node audit-graph-node--${data.kind}`}>
@@ -56,37 +61,99 @@ function EvidenceNode({ data }: NodeProps<Node<EvidenceGraphNodeData>>) {
 }
 const nodeTypes: NodeTypes = { evidenceNode: EvidenceNode };
 
-function snapshotForRoute(route: AuditRoute): AuditViewSnapshot | null {
-  // Offline playback intentionally supports only its documented opaque reference.
-  if (route.publicReference !== "demo_false_consensus") return null;
-  const snapshot = createMockAuditSnapshot();
-  const maximumCursor = Math.max(...snapshot.events.map((event) => event.sequence));
-  return snapshot.run_id === route.runId &&
-    snapshot.selected_plan_id === route.planId &&
-    route.cursor <= maximumCursor
-    ? snapshot
-    : null;
+async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!response.ok) throw new Error("audit_unavailable");
+  return (await response.json()) as T;
 }
 
-async function fetchAuditSnapshot(
-  route: AuditRoute,
-  signal: AbortSignal,
-): Promise<AuditViewSnapshot> {
-  const response = await fetch(
-    `/api/audit/${encodeURIComponent(route.publicReference)}?cursor=${route.cursor}`,
-    { credentials: "same-origin", signal },
-  );
-  // Collapse authorization and lookup failures to avoid revealing protected record existence.
-  if (!response.ok) throw new Error("audit_unavailable");
-  const snapshot = (await response.json()) as AuditViewSnapshot;
-  const maximumCursor = Math.max(...snapshot.events.map((event) => event.sequence));
-  if (
-    snapshot.run_id !== route.runId ||
-    snapshot.selected_plan_id !== route.planId ||
-    route.cursor > maximumCursor
-  )
-    throw new Error("audit_unavailable");
-  return snapshot;
+function resourcePath(reference: string, resource: string, cursor?: string | null): string {
+  const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) query.set("cursor", cursor);
+  return `/api/audit/${encodeURIComponent(reference)}/${resource}?${query}`;
+}
+
+function buildEvidenceGraph(evidence: AuditEvidenceItem[]): {
+  nodes: Node<EvidenceGraphNodeData>[];
+  edges: Edge[];
+} {
+  const nodes: Node<EvidenceGraphNodeData>[] = [];
+  const edges: Edge[] = [];
+  const sourceRows = new Map<string, number>();
+  const claimRows = new Map<string, number>();
+  const evidenceIds = new Set(evidence.map((item) => item.evidence_id));
+
+  for (const [index, item] of evidence.entries()) {
+    const sourceId = `source:${item.source_group}`;
+    if (!sourceRows.has(sourceId)) {
+      const sourceIndex = sourceRows.size;
+      sourceRows.set(sourceId, sourceIndex);
+      nodes.push({
+        id: sourceId,
+        type: "evidenceNode",
+        position: { x: 20, y: 28 + sourceIndex * 150 },
+        data: { label: item.source_group, kind: "source", detail: item.source_type },
+      });
+    }
+    nodes.push({
+      id: item.evidence_id,
+      type: "evidenceNode",
+      position: { x: 300, y: 28 + index * 150 },
+      data: {
+        label: item.content_summary,
+        kind: "evidence",
+        detail: item.origin === "external" ? "Externally observed" : "Agent-derived",
+      },
+    });
+    edges.push({
+      id: `${sourceId}:${item.evidence_id}`,
+      source: sourceId,
+      target: item.evidence_id,
+      type: "smoothstep",
+      markerEnd: { type: MarkerType.ArrowClosed },
+      data: { kind: "retrieved_from" },
+    });
+    for (const claim of item.claims) {
+      if (!claimRows.has(claim.claim_id)) {
+        const claimIndex = claimRows.size;
+        claimRows.set(claim.claim_id, claimIndex);
+        nodes.push({
+          id: claim.claim_id,
+          type: "evidenceNode",
+          position: { x: 590, y: 28 + claimIndex * 150 },
+          data: {
+            label: claim.human_summary,
+            kind: "claim",
+            detail: `${claim.predicate} · ${claim.materiality}`,
+          },
+        });
+      }
+      edges.push({
+        id: `${item.evidence_id}:${claim.claim_id}`,
+        source: item.evidence_id,
+        target: claim.claim_id,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: { kind: "supports" },
+      });
+    }
+    for (const parent of item.derived_from) {
+      if (!evidenceIds.has(parent)) continue;
+      edges.push({
+        id: `${item.evidence_id}:derived:${parent}`,
+        source: parent,
+        target: item.evidence_id,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: { kind: "derived_from" },
+      });
+    }
+  }
+  return { nodes, edges };
 }
 
 function AuditUnavailable() {
@@ -94,68 +161,80 @@ function AuditUnavailable() {
     <main className="audit-unavailable" aria-labelledby="audit-unavailable-title">
       <p className="eyebrow">Civitas / Read-only audit</p>
       <h1 id="audit-unavailable-title">This audit view is unavailable.</h1>
-      <p>
-        Check that you opened the complete audit link while signed in to the organization that owns
-        the decision.
-      </p>
+      <p>The signed link is incomplete, expired, revoked, or no longer available.</p>
     </main>
   );
 }
 
+function LoadMore({ label, onLoad }: { label: string; onLoad: () => void }) {
+  return (
+    <button className="audit-load-more" type="button" onClick={onLoad}>
+      {label}
+    </button>
+  );
+}
+
 export function App() {
-  const route = useMemo(() => readAuditRoute(window.location), []);
-  const mockSnapshot = route ? snapshotForRoute(route) : null;
-  const [snapshot, setSnapshot] = useState<AuditViewSnapshot | null>(mockSnapshot);
-  const [loading, setLoading] = useState(Boolean(route && !mockSnapshot));
+  const reference = useMemo(() => readAuditReference(window.location), []);
+  const [manifest, setManifest] = useState<AuditManifest | null>(null);
+  const [events, setEvents] = useState<AuditEventItem[]>([]);
+  const [evidence, setEvidence] = useState<AuditEvidenceItem[]>([]);
+  const [executionEvents, setExecutionEvents] = useState<AuditExecutionEventItem[]>([]);
+  const [eventCursor, setEventCursor] = useState<string | null>(null);
+  const [evidenceCursor, setEvidenceCursor] = useState<string | null>(null);
+  const [executionCursor, setExecutionCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(Boolean(reference));
+  const [unavailable, setUnavailable] = useState(!reference);
 
   useEffect(() => {
-    if (!route || mockSnapshot) return;
+    if (!reference) return;
     const controller = new AbortController();
-    void fetchAuditSnapshot(route, controller.signal)
-      .then(setSnapshot)
-      .catch(() => setSnapshot(null))
+    const encoded = encodeURIComponent(reference);
+    void Promise.all([
+      getJson<AuditManifest>(`/api/audit/${encoded}/manifest`, controller.signal),
+      getJson<AuditPage<AuditEventItem>>(resourcePath(reference, "events"), controller.signal),
+      getJson<AuditPage<AuditEvidenceItem>>(resourcePath(reference, "evidence"), controller.signal),
+      getJson<AuditPage<AuditExecutionEventItem>>(
+        resourcePath(reference, "execution"),
+        controller.signal,
+      ),
+    ])
+      .then(([nextManifest, eventPage, evidencePage, executionPage]) => {
+        setManifest(nextManifest);
+        setEvents(eventPage.items);
+        setEvidence(evidencePage.items);
+        setExecutionEvents(executionPage.items);
+        setEventCursor(eventPage.next_cursor ?? null);
+        setEvidenceCursor(evidencePage.next_cursor ?? null);
+        setExecutionCursor(executionPage.next_cursor ?? null);
+      })
+      .catch(() => setUnavailable(true))
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [mockSnapshot, route]);
+  }, [reference]);
 
-  const visibleEvents = useMemo(
-    () =>
-      snapshot && route ? snapshot.events.filter((event) => event.sequence <= route.cursor) : [],
-    [route, snapshot],
-  );
-  const currentCycle = useMemo(
-    () => Math.max(1, ...visibleEvents.map((event) => Number(event.payload.cycle) || 1)),
-    [visibleEvents],
-  );
-  const jury = useMemo<JuryCycleSnapshot | null>(
-    () =>
-      snapshot?.jury.find((item) => item.cycle === currentCycle) ?? snapshot?.jury.at(-1) ?? null,
-    [currentCycle, snapshot],
-  );
-  const graph = useMemo(
-    () =>
-      snapshot?.evidence_graphs.find((item) => item.cycle === currentCycle) ??
-      snapshot?.evidence_graphs.at(-1),
-    [currentCycle, snapshot],
-  );
-  const graphNodes = useMemo<Node<EvidenceGraphNodeData>[]>(
-    () => (graph?.nodes ?? []).map((node) => ({ ...node, type: "evidenceNode" })),
-    [graph],
-  );
-  const graphEdges = useMemo<Edge[]>(
-    () =>
-      (graph?.edges ?? []).map((edge) => ({
-        ...edge,
-        type: "smoothstep",
-        animated: edge.data.kind === "contradicts",
-        markerEnd: { type: MarkerType.ArrowClosed },
-      })),
-    [graph],
-  );
+  const loadPage = async <T,>(
+    resource: string,
+    cursor: string,
+    append: Dispatch<SetStateAction<T[]>>,
+    updateCursor: Dispatch<SetStateAction<string | null>>,
+  ) => {
+    if (!reference) return;
+    try {
+      const page = await getJson<AuditPage<T>>(resourcePath(reference, resource, cursor));
+      append((items) => [...items, ...page.items]);
+      updateCursor(page.next_cursor ?? null);
+    } catch {
+      setUnavailable(true);
+    }
+  };
 
-  if (!route || (!loading && !snapshot) || !jury) return <AuditUnavailable />;
-  if (loading || !snapshot)
-    return <main className="audit-unavailable">Loading read-only audit…</main>;
+  const graph = useMemo(() => buildEvidenceGraph(evidence), [evidence]);
+  const jury = manifest?.jury.at(-1) ?? null;
+
+  if (unavailable || (!loading && (!manifest || !jury))) return <AuditUnavailable />;
+  if (loading || !manifest || !jury)
+    return <main className="audit-unavailable">Loading signed audit snapshot…</main>;
 
   return (
     <div className="audit-viewer">
@@ -169,30 +248,38 @@ export function App() {
           </span>
           <span>Civitas</span>
         </a>
-        <p>Read-only decision record</p>
+        <p>Signed · scoped · read-only</p>
       </header>
       <main id="audit-main" className="audit-main">
         <section className="audit-masthead" aria-labelledby="audit-title">
           <div>
-            <p className="eyebrow">Procurement decision / Event {route.cursor}</p>
-            <h1 id="audit-title">{snapshot.title}</h1>
-            <p>{snapshot.summary}</p>
+            <p className="eyebrow">
+              Procurement decision / Event {manifest.maximum_event_sequence}
+            </p>
+            <h1 id="audit-title">{manifest.title}</h1>
+            <p>{manifest.summary}</p>
           </div>
           <dl className="audit-identifiers">
             <div>
               <dt>Run</dt>
-              <dd>{snapshot.run_id}</dd>
+              <dd>{manifest.run_id}</dd>
             </div>
             <div>
               <dt>Selected plan</dt>
-              <dd>{snapshot.selected_plan_id}</dd>
+              <dd>{manifest.selected_plan_id}</dd>
             </div>
             <div>
-              <dt>Public record</dt>
-              <dd>{route.publicReference}</dd>
+              <dt>Policy</dt>
+              <dd>{manifest.policy_version}</dd>
             </div>
           </dl>
         </section>
+        <aside className="audit-custody" aria-label="Immutable snapshot scope">
+          <span>Snapshot seal</span>
+          <strong>Captured {formatDate(manifest.captured_at)} UTC</strong>
+          <p>Bound to one organization, solver-selected plan, and event ceiling.</p>
+          <small>Link expires {formatDate(manifest.link_expires_at)} UTC</small>
+        </aside>
         <section className="audit-overview" aria-label="Decision status">
           <div className={`audit-state audit-state--${jury.state}`}>
             <span>Jury state</span>
@@ -201,29 +288,39 @@ export function App() {
           <div>
             <span>Decision Integrity</span>
             <strong>{jury.integrity_score}</strong>
-            <small>Policy {snapshot.policy_version}</small>
+            <small>Policy score</small>
           </div>
           <div>
-            <span>Event cursor</span>
-            <strong>{route.cursor}</strong>
-            <small>{visibleEvents.length} visible events</small>
+            <span>Evidence records</span>
+            <strong>{evidence.length}</strong>
+            <small>{evidenceCursor ? "More available" : "Complete page set"}</small>
           </div>
           <div>
             <span>Execution</span>
-            <strong>{snapshot.execution.current_state.replaceAll("_", " ")}</strong>
-            <small>Receipt only</small>
+            <strong>{manifest.execution.current_state.replaceAll("_", " ")}</strong>
+            <small>Ledger projection only</small>
           </div>
         </section>
         <section className="audit-section" aria-labelledby="lineage-title">
           <header>
-            <p className="eyebrow">Evidence lineage / Cycle {currentCycle}</p>
-            <h2 id="lineage-title">What supports this decision</h2>
+            <div>
+              <p className="eyebrow">Evidence chain of custody</p>
+              <h2 id="lineage-title">What supports this decision</h2>
+            </div>
+            {evidenceCursor && (
+              <LoadMore
+                label="Load more evidence"
+                onLoad={() =>
+                  void loadPage("evidence", evidenceCursor, setEvidence, setEvidenceCursor)
+                }
+              />
+            )}
           </header>
           <div className="audit-graph" role="img" aria-label="Read-only evidence lineage graph">
             <ReactFlow
               fitView
-              nodes={graphNodes}
-              edges={graphEdges}
+              nodes={graph.nodes}
+              edges={graph.edges}
               nodeTypes={nodeTypes}
               nodesDraggable={false}
               nodesConnectable={false}
@@ -231,23 +328,26 @@ export function App() {
               panOnDrag
               zoomOnScroll={false}
               zoomOnPinch
-              minZoom={0.55}
+              minZoom={0.45}
               maxZoom={1.5}
               proOptions={{ hideAttribution: true }}
             >
-              <Background color="rgba(33, 55, 44, 0.12)" gap={28} />
+              <Background color="rgba(17, 44, 57, 0.13)" gap={28} />
             </ReactFlow>
           </div>
           <p className="audit-caption">
-            Source groups and contradictions are shown for inspection only. This viewer cannot
-            approve, refresh, or execute a plan.
+            Canonical source groups, external observations, typed claims, and derivations are
+            projected without raw provider payloads. This viewer cannot approve, refresh, or execute
+            a plan.
           </p>
         </section>
         <div className="audit-grid">
           <section className="audit-section" aria-labelledby="integrity-title">
             <header>
-              <p className="eyebrow">Integrity v1</p>
-              <h2 id="integrity-title">Components and hard gates</h2>
+              <div>
+                <p className="eyebrow">Integrity v1</p>
+                <h2 id="integrity-title">Components and hard gates</h2>
+              </div>
             </header>
             <dl className="audit-components">
               {Object.entries(jury.components).map(([name, score]) => (
@@ -260,7 +360,7 @@ export function App() {
             <ul className="audit-gates">
               {jury.gates.map((gate) => (
                 <li key={gate.gate_code} className={gate.passed ? "is-passed" : "is-blocked"}>
-                  <span>{gate.gate_code.replaceAll("-", " ")}</span>
+                  <span>{gate.gate_code.replaceAll("_", " ")}</span>
                   <strong>{gate.passed ? "Pass" : "Blocked"}</strong>
                 </li>
               ))}
@@ -268,22 +368,24 @@ export function App() {
           </section>
           <section className="audit-section" aria-labelledby="timeline-title">
             <header>
-              <p className="eyebrow">Replanning timeline</p>
-              <h2 id="timeline-title">How the case changed</h2>
+              <div>
+                <p className="eyebrow">Persisted workflow</p>
+                <h2 id="timeline-title">How the case changed</h2>
+              </div>
+              {eventCursor && (
+                <LoadMore
+                  label="Load more events"
+                  onLoad={() => void loadPage("events", eventCursor, setEvents, setEventCursor)}
+                />
+              )}
             </header>
             <ol className="audit-timeline">
-              {visibleEvents.map((event: WorkflowEvent) => (
+              {events.map((event) => (
                 <li key={event.event_id}>
                   <time dateTime={event.occurred_at}>{formatClock(event.occurred_at)}</time>
                   <div>
                     <strong>{eventLabel(event.event_type)}</strong>
-                    <p>
-                      {String(
-                        event.payload.note ??
-                          event.payload.detail ??
-                          "Recorded workflow transition.",
-                      )}
-                    </p>
+                    <p>{event.message}</p>
                   </div>
                 </li>
               ))}
@@ -292,23 +394,47 @@ export function App() {
         </div>
         <section className="audit-section audit-receipt" aria-labelledby="receipt-title">
           <header>
-            <p className="eyebrow">Immutable execution receipt</p>
-            <h2 id="receipt-title">{snapshot.execution.approved_plan_id}</h2>
+            <div>
+              <p className="eyebrow">Immutable execution ledger</p>
+              <h2 id="receipt-title">{manifest.execution.approved_plan_id}</h2>
+            </div>
+            {executionCursor && (
+              <LoadMore
+                label="Load more ledger entries"
+                onLoad={() =>
+                  void loadPage(
+                    "execution",
+                    executionCursor,
+                    setExecutionEvents,
+                    setExecutionCursor,
+                  )
+                }
+              />
+            )}
           </header>
-          <p>{snapshot.execution.detail}</p>
+          <p>{manifest.execution.detail}</p>
           <ol>
-            {snapshot.execution.steps.map((step) => (
-              <li key={step.label}>
-                <strong>{step.label}</strong>
-                <span>{step.state.replaceAll("_", " ")}</span>
-                <small>{step.detail}</small>
+            {executionEvents.length ? (
+              executionEvents.map((entry) => (
+                <li key={entry.sequence}>
+                  <strong>Entry {entry.sequence}</strong>
+                  <span>{entry.state.replaceAll("_", " ")}</span>
+                  <small>{entry.detail ?? entry.reason_code ?? "Recorded state transition."}</small>
+                </li>
+              ))
+            ) : (
+              <li>
+                <strong>No execution entries</strong>
+                <span>Read-only</span>
+                <small>No guarded execution existed at snapshot time.</small>
               </li>
-            ))}
+            )}
           </ol>
         </section>
       </main>
       <footer className="audit-footer">
-        Civitas audit viewer · Read-only · Execution authority remains with the guarded service
+        Civitas audit viewer · Immutable snapshot · Execution authority remains with the guarded
+        service
       </footer>
     </div>
   );

@@ -203,6 +203,11 @@ class Executions:
 
 @pytest.mark.asyncio
 async def test_codex_mcp_sequence_uses_immutable_challenge_and_idempotent_receipt() -> None:
+    class Links:
+        async def issue(self, organization_id: str, run_id: str, plan_id: str, cursor: int) -> str:
+            del organization_id, plan_id
+            return f"/audit/{run_id}?cursor={cursor}"
+
     executions = Executions()
     approvals = Approvals()
     facade = ProcurementApplicationFacade(
@@ -211,7 +216,7 @@ async def test_codex_mcp_sequence_uses_immutable_challenge_and_idempotent_receip
         executions=executions,
         ids=IDs(),
         clock=Clock(),
-        audit_link_for=lambda run_id, cursor: f"/audit/{run_id}?cursor={cursor}",
+        audit_links=Links(),
     )
     server = InboundMCPServer(facade, StaticIdentityProvider(_context()))
     goal = {

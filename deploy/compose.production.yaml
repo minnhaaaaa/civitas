@@ -14,6 +14,9 @@ services:
       CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-true}
       CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:?configure module:callable}
       CIVITAS_REQUIRE_WORKER_READY: "true"
+      CIVITAS_AUDIT_VIEWER_ENABLED: ${CIVITAS_AUDIT_VIEWER_ENABLED:-false}
+      CIVITAS_AUDIT_VIEWER_BASE_URL: ${CIVITAS_AUDIT_VIEWER_BASE_URL:-}
+      CIVITAS_AUDIT_LINK_SECRET: ${CIVITAS_AUDIT_LINK_SECRET:-}
       CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?inject at runtime}
       CIVITAS_APPROVAL_SECRET_PEPPER: ${CIVITAS_APPROVAL_SECRET_PEPPER:?inject at runtime}
       CIVITAS_ORGANIZATION_ID: ${CIVITAS_ORGANIZATION_ID:?bind at runtime}
@@ -52,3 +55,6 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
+
+  audit-viewer:
+    ports: !reset []

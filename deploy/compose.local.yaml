@@ -35,6 +35,10 @@ services:
       CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-false}
       CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:-}
       CIVITAS_REQUIRE_WORKER_READY: ${CIVITAS_REQUIRE_WORKER_READY:-false}
+      CIVITAS_AUDIT_VIEWER_ENABLED: ${CIVITAS_AUDIT_VIEWER_ENABLED:-false}
+      CIVITAS_AUDIT_VIEWER_BASE_URL: ${CIVITAS_AUDIT_VIEWER_BASE_URL:-}
+      CIVITAS_AUDIT_LINK_SECRET: ${CIVITAS_AUDIT_LINK_SECRET:-}
+      CIVITAS_AUDIT_LINK_TTL_SECONDS: ${CIVITAS_AUDIT_LINK_TTL_SECONDS:-900}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -117,6 +121,27 @@ services:
     restart: unless-stopped
     tmpfs:
       - /tmp:size=64m,mode=1777
+
+  audit-viewer:
+    profiles: ["audit-viewer"]
+    build:
+      context: ..
+      dockerfile: deploy/audit-viewer.Dockerfile
+    image: civitas-audit-viewer:local
+    ports:
+      - "${CIVITAS_AUDIT_VIEWER_PORT:-8080}:8080"
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=4m,mode=0755
+    restart: unless-stopped
 
   # This is intentionally separate from the application trust boundary. The
   # provider simulator is for deterministic local MCP integration only.
