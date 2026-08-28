@@ -35,6 +35,7 @@ class WorkerRunner:
         self._recovery_interval = recovery_interval
 
     async def run_once(self) -> bool:
+        await self._worker.heartbeat()
         await self._worker.recover_abandoned()
         return await self._worker.process_next()
 
@@ -42,6 +43,7 @@ class WorkerRunner:
         loop = asyncio.get_running_loop()
         next_recovery = 0.0
         while not stop.is_set():
+            await self._worker.heartbeat()
             now = loop.time()
             if now >= next_recovery:
                 await self._worker.recover_abandoned()

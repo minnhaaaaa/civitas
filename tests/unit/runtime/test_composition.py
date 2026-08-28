@@ -88,6 +88,10 @@ async def test_composition_wires_authenticated_mcp_and_rejects_wrong_token() -> 
         assert context.operator_id == "operator-1"
         assert context.authenticated_at.tzinfo is UTC
         assert runtime.mcp_server._authorizer is not None
+        http_app = runtime.http_app()
+        paths = {route.path for route in http_app.routes}
+        assert {"/health/live", "/health/ready", "/metrics"} <= paths
+        assert runtime.http_app() is http_app
     finally:
         await runtime.close()
 

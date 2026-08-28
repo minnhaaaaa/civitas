@@ -11,6 +11,9 @@ services:
     environment:
       CIVITAS_ENV: production
       CIVITAS_LOG_FORMAT: json
+      CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-true}
+      CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:?configure module:callable}
+      CIVITAS_REQUIRE_WORKER_READY: "true"
       CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?inject at runtime}
       CIVITAS_APPROVAL_SECRET_PEPPER: ${CIVITAS_APPROVAL_SECRET_PEPPER:?inject at runtime}
       CIVITAS_ORGANIZATION_ID: ${CIVITAS_ORGANIZATION_ID:?bind at runtime}
@@ -27,6 +30,8 @@ services:
     environment:
       CIVITAS_ENV: production
       CIVITAS_LOG_FORMAT: json
+      CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-true}
+      CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:?configure module:callable}
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -36,6 +41,9 @@ services:
     environment:
       CIVITAS_ENV: production
       CIVITAS_LOG_FORMAT: json
+      CIVITAS_LIVE_PROVIDER_REQUIRED: ${CIVITAS_LIVE_PROVIDER_REQUIRED:-true}
+      CIVITAS_PROVIDER_FACTORY: ${CIVITAS_PROVIDER_FACTORY:?configure module:callable}
+      CIVITAS_REQUIRE_WORKER_READY: "true"
       CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?inject at runtime}
       CIVITAS_OAUTH_ISSUER: ${CIVITAS_OAUTH_ISSUER:-}
       CIVITAS_OAUTH_AUDIENCE: ${CIVITAS_OAUTH_AUDIENCE:-}

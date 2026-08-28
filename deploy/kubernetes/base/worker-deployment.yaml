@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: civitas-worker
+  labels:
+    app.kubernetes.io/name: civitas-worker
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: civitas-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: civitas-worker
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: civitas
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migration-gate
+          image: civitas:0.1.0
+          args: ["alembic", "current", "--check-heads"]
+          envFrom:
+            - configMapRef: {name: civitas-runtime}
+            - secretRef: {name: civitas-runtime-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      containers:
+        - name: worker
+          image: civitas:0.1.0
+          imagePullPolicy: IfNotPresent
+          args: ["civitas-worker"]
+          envFrom:
+            - configMapRef:
+                name: civitas-runtime
+            - secretRef:
+                name: civitas-runtime-secrets
+          env:
+            - name: CIVITAS_SERVICE_NAME
+              value: civitas-worker
+            - name: CIVITAS_WORKER_FACTORY
+              value: civitas.runtime:create_worker
+            - name: CIVITAS_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          livenessProbe:
+            exec:
+              command: ["python", "scripts/worker_healthcheck.py"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

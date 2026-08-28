@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: civitas
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: civitas-mcp
+  labels:
+    app.kubernetes.io/name: civitas-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: civitas-mcp
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http

@@ -11,6 +11,10 @@ class FakeWorker:
         self.recoveries = 0
         self.processed = 0
         self.closed = 0
+        self.heartbeats = 0
+
+    async def heartbeat(self) -> None:
+        self.heartbeats += 1
 
     async def recover_abandoned(self) -> int:
         self.recoveries += 1
@@ -32,6 +36,7 @@ async def test_runner_recovers_before_one_shot_processing() -> None:
     assert await runner.run_once() is True
     assert worker.recoveries == 1
     assert worker.processed == 1
+    assert worker.heartbeats == 1
 
 
 @pytest.mark.asyncio
@@ -46,6 +51,7 @@ async def test_runner_stops_cleanly_while_queue_is_idle() -> None:
 
     assert worker.recoveries == 1
     assert worker.processed == 1
+    assert worker.heartbeats >= 1
 
 
 def test_factory_path_must_be_explicit_and_callable() -> None:

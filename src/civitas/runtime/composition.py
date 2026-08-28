@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -32,7 +34,6 @@ from civitas.identity import (
 )
 from civitas.identity.audit import (
     AuthenticationAuditSink,
-    NullAuthenticationAuditSink,
 )
 from civitas.identity.context import AuthenticatedPrincipal, derive_operator_context
 from civitas.integrations.mcp import CleanRoomNamespace
@@ -41,6 +42,7 @@ from civitas.mcp_server import InboundMCPServer, StaticIdentityProvider
 from civitas.optimization.adapter import OrToolsOptimizer
 from civitas.persistence.database import Database
 from civitas.persistence.evidence import PostgreSQLEvidenceLedger
+from civitas.persistence.health import PostgreSQLServiceHealthStore
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 from civitas.ports.identity import OperatorContext
@@ -54,6 +56,8 @@ from civitas.runtime.adapters import (
     UUIDGenerator,
 )
 from civitas.runtime.config import RuntimeSettings
+from civitas.runtime.health import RuntimeHealth, install_operational_surface
+from civitas.runtime.observability import LoggingAuthenticationAuditSink, MetricsRegistry
 from civitas.worker import DurableWorkflowWorker
 from civitas.workflow.orchestrator import ParliamentWorkflow
 
@@ -110,18 +114,46 @@ class RuntimeApplication:
     rate_limiter: RateLimiter
     authentication_audit: AuthenticationAuditSink
     mcp_server: InboundMCPServer
+    health: RuntimeHealth
+    metrics: MetricsRegistry
+    _closed: bool = False
+    _http_app: Any = None
 
     def http_app(self) -> Any:
+        if self._http_app is not None:
+            return self._http_app
         app = self.mcp_server.streamable_http_app(
             verifier=self.identity,
             rate_limiter=self.rate_limiter,
             audit_sink=self.authentication_audit,
         )
+        install_operational_surface(
+            app,
+            health=self.health,
+            metrics=self.metrics,
+            settings=self.settings,
+        )
         app_with_lifecycle: Any = app
-        app_with_lifecycle.add_event_handler("shutdown", self.close)
+        original_lifespan = app_with_lifecycle.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(application: Any) -> AsyncIterator[object]:
+            await self.health.start()
+            try:
+                async with original_lifespan(application) as state:
+                    yield state
+            finally:
+                await self.close()
+
+        app_with_lifecycle.router.lifespan_context = lifespan
+        self._http_app = app
         return app
 
     async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await self.health.stop()
         await self.database.dispose()
 
 
@@ -241,11 +273,18 @@ def build_runtime(
         requests=settings.rate_limit_requests,
         window_seconds=settings.rate_limit_window_seconds,
     )
-    effective_audit = authentication_audit or NullAuthenticationAuditSink()
+    effective_audit = authentication_audit or LoggingAuthenticationAuditSink()
     server = InboundMCPServer(
         facade,
         StaticIdentityProvider(operator_context),
         authorizer=RoleAuthorizer(),
+    )
+    service_health = PostgreSQLServiceHealthStore(database.sessions)
+    health = RuntimeHealth(
+        store=service_health,
+        clock=clock,
+        settings=settings,
+        service_id=ids.new_id("mcp-server"),
     )
     return RuntimeApplication(
         settings=settings,
@@ -260,6 +299,8 @@ def build_runtime(
         rate_limiter=effective_rate_limiter,
         authentication_audit=effective_audit,
         mcp_server=server,
+        health=health,
+        metrics=MetricsRegistry(),
     )
 
 
@@ -272,18 +313,45 @@ def build_worker(
 
     runtime = build_runtime(settings, provider_planning=provider_planning)
     worker_id = settings.worker_id or UUIDGenerator().new_id("worker")
+    service_health = PostgreSQLServiceHealthStore(runtime.database.sessions)
+    clock = SystemClock()
     return DurableWorkflowWorker(
         worker_id=worker_id,
         workflow=runtime.workflow,
         store=runtime.checkpoints,
-        clock=SystemClock(),
+        clock=clock,
         lease_for=timedelta(seconds=settings.worker_lease_seconds),
         max_attempts=settings.worker_max_attempts,
         close=runtime.close,
+        heartbeat=lambda: service_health.heartbeat(
+            service_id=worker_id,
+            service_kind="worker",
+            now=clock.now(),
+        ),
+        stopping=lambda: service_health.heartbeat(
+            service_id=worker_id,
+            service_kind="worker",
+            now=clock.now(),
+            state="stopping",
+        ),
     )
 
 
-def create_worker() -> DurableWorkflowWorker:
+async def create_worker() -> DurableWorkflowWorker:
     """Environment-driven factory consumed by ``civitas-worker``."""
 
-    return build_worker(RuntimeSettings.from_env())
+    from civitas.runtime.bootstrap import load_provider_runtime
+    from civitas.runtime.observability import configure_logging
+
+    settings = RuntimeSettings.from_env()
+    configure_logging(
+        service="civitas-worker",
+        environment=settings.environment,
+        level=settings.log_level,
+        log_format=settings.log_format,
+    )
+    provider = await load_provider_runtime(settings)
+    return build_worker(
+        settings,
+        provider_planning=None if provider is None else provider.planning,
+    )
