@@ -5,8 +5,10 @@ from tools.mock_mcp import MockProcurementMCPServer
 
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall
 from civitas.integrations import (
+    DEFAULT_EXECUTION_POLICY,
     DEFAULT_PROCUREMENT_POLICY,
     DissentMCPClient,
+    ExecutionMCPClient,
     MCPAccessError,
     MCPClient,
     ToolEvidenceMapping,
@@ -79,7 +81,7 @@ async def test_dissent_client_is_read_only() -> None:
 @pytest.mark.asyncio
 async def test_repeated_write_idempotency_returns_original_result() -> None:
     server = MockProcurementMCPServer()
-    client = MCPClient(transport=server, policy=DEFAULT_PROCUREMENT_POLICY)
+    client = ExecutionMCPClient(transport=server, policy=DEFAULT_EXECUTION_POLICY)
     first = await client.invoke(
         _write_call("create_procurement_order", call_id="first", idempotency_key="same")
     )
@@ -94,7 +96,7 @@ async def test_repeated_write_idempotency_returns_original_result() -> None:
 @pytest.mark.asyncio
 async def test_write_requires_non_empty_idempotency_key() -> None:
     server = MockProcurementMCPServer()
-    client = MCPClient(transport=server, policy=DEFAULT_PROCUREMENT_POLICY)
+    client = ExecutionMCPClient(transport=server, policy=DEFAULT_EXECUTION_POLICY)
 
     with pytest.raises(MCPAccessError, match="non-empty idempotency key"):
         await client.invoke(_write_call("create_procurement_order", idempotency_key=""))

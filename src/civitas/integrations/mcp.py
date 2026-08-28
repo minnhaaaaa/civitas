@@ -66,6 +66,8 @@ class MCPClient(MCPPort):
     """Policy-enforced MCP client that preserves provider neutrality."""
 
     def __init__(self, *, transport: MCPTransport, policy: MCPCapabilityPolicy) -> None:
+        if type(self) is MCPClient and policy.write_tools:
+            raise MCPAccessError("Provider writes require an ExecutionMCPClient dependency.")
         self._transport = transport
         self._policy = policy
 
@@ -83,6 +85,14 @@ class MCPClient(MCPPort):
             detail = result.error_message or "MCP tool invocation failed."
             raise MCPInvocationError(f"{call.tool_name} failed: {detail}")
         return result
+
+
+class ExecutionMCPClient(MCPClient):
+    """MCP client reserved for guarded execution services.
+
+    Keeping this as a separate dependency prevents planning and investigation
+    components from acquiring a provider-write client accidentally.
+    """
 
 
 class DissentMCPClient(MCPClient):
@@ -221,7 +231,17 @@ _READ_TOOLS = frozenset(
 )
 
 
-DEFAULT_PROCUREMENT_POLICY = MCPCapabilityPolicy(
+DEFAULT_READ_POLICY = MCPCapabilityPolicy(
+    read_tools=_READ_TOOLS,
+    write_tools=frozenset(),
+)
+
+
+DEFAULT_EXECUTION_POLICY = MCPCapabilityPolicy(
     read_tools=_READ_TOOLS,
     write_tools=frozenset({"create_procurement_order", "reserve_inventory"}),
 )
+
+# Backwards-compatible name for planning reads. Writes now require the explicit
+# execution policy and ExecutionMCPClient dependency.
+DEFAULT_PROCUREMENT_POLICY = DEFAULT_READ_POLICY

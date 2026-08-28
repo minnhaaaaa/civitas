@@ -1,9 +1,12 @@
 """External model and MCP adapters."""
 
 from civitas.integrations.mcp import (
+    DEFAULT_EXECUTION_POLICY,
     DEFAULT_PROCUREMENT_POLICY,
+    DEFAULT_READ_POLICY,
     CleanRoomNamespace,
     DissentMCPClient,
+    ExecutionMCPClient,
     FakeMCPAdapter,
     MCPAccessError,
     MCPCapabilityPolicy,
@@ -25,15 +28,30 @@ from civitas.integrations.model import (
     ModelTransportError,
     RetryPolicy,
 )
+from civitas.integrations.providers import (
+    ExecutionProviderContext,
+    InMemoryCredentialResolver,
+    ProviderConnections,
+    ProviderEvidenceClient,
+    ProviderOnboarder,
+    ProviderRetryPolicy,
+    ResilientProviderTransport,
+    SecretProviderCredential,
+)
 
 __all__ = [
+    "DEFAULT_EXECUTION_POLICY",
     "DEFAULT_PROCUREMENT_POLICY",
+    "DEFAULT_READ_POLICY",
     "CleanRoomNamespace",
     "DissentMCPClient",
+    "ExecutionMCPClient",
+    "ExecutionProviderContext",
     "FakeMCPAdapter",
     "FakeModelAdapter",
     "FakeModelPlan",
     "GroqModelAdapter",
+    "InMemoryCredentialResolver",
     "MCPAccessError",
     "MCPCapabilityPolicy",
     "MCPClient",
@@ -44,7 +62,13 @@ __all__ = [
     "ModelResponseFormatError",
     "ModelTimeoutError",
     "ModelTransportError",
+    "ProviderConnections",
+    "ProviderEvidenceClient",
+    "ProviderOnboarder",
+    "ProviderRetryPolicy",
+    "ResilientProviderTransport",
     "RetryPolicy",
+    "SecretProviderCredential",
     "ToolEvidenceMapping",
     "clean_room_namespace",
     "evidence_from_tool_result",

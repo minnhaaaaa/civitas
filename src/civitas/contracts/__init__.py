@@ -55,6 +55,16 @@ from civitas.contracts.optimization import (
     OptimizationResult,
     ProcurementLine,
 )
+from civitas.contracts.providers import (
+    OperationalEvidenceKind,
+    OperationalObservation,
+    ProviderAccessContext,
+    ProviderCapabilityManifest,
+    ProviderEvidenceRead,
+    ProviderOnboardingReport,
+    ProviderRegistration,
+    ProviderToolCapability,
+)
 from civitas.contracts.tools import MCPToolCall, MCPToolResult
 from civitas.contracts.workflow import SSEPayload, WorkflowEvent
 
@@ -99,6 +109,8 @@ __all__ = [
     "ModelRequest",
     "ModelResponse",
     "ModelUsage",
+    "OperationalEvidenceKind",
+    "OperationalObservation",
     "OptimizationRequest",
     "OptimizationResult",
     "PageRequest",
@@ -115,6 +127,12 @@ __all__ = [
     "ProductErrorCode",
     "ProductServiceError",
     "ProgressCursor",
+    "ProviderAccessContext",
+    "ProviderCapabilityManifest",
+    "ProviderEvidenceRead",
+    "ProviderOnboardingReport",
+    "ProviderRegistration",
+    "ProviderToolCapability",
     "Quantity",
     "SSEPayload",
     "TypedClaim",

@@ -6,7 +6,12 @@ import pytest
 from pydantic import ValidationError
 
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall, MCPToolResult
-from civitas.integrations import DEFAULT_PROCUREMENT_POLICY, MCPAccessError, MCPClient
+from civitas.integrations import (
+    DEFAULT_EXECUTION_POLICY,
+    DEFAULT_PROCUREMENT_POLICY,
+    MCPAccessError,
+    MCPClient,
+)
 
 
 class RecordingTransport:
@@ -89,3 +94,8 @@ async def test_confused_deputy_write_attempt_needs_the_explicit_write_policy() -
         )
 
     assert transport.calls == []
+
+
+def test_general_provider_client_cannot_be_given_execution_write_capabilities() -> None:
+    with pytest.raises(MCPAccessError, match="ExecutionMCPClient"):
+        MCPClient(transport=RecordingTransport(), policy=DEFAULT_EXECUTION_POLICY)
