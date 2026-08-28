@@ -101,9 +101,7 @@ class RoleAgent:
         ordered = tuple(sorted(assessments, key=lambda item: (-item.score, item.plan_id)))
         preferred = ordered[0]
         acceptable = tuple(item.plan_id for item in ordered if item.score == preferred.score)
-        annotations = context.plan_annotations.get(preferred.plan_id, {})
-        if not isinstance(annotations, dict):
-            annotations = {}
+        annotations = _support_annotations(context.plan_annotations, preferred.plan_id)
         return ParliamentProposal(
             role=self.role.value,
             preferred_plan_id=preferred.plan_id,
@@ -244,3 +242,40 @@ def _tuple_strings(value: object) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(item for item in value if isinstance(item, str))
+
+
+def _support_annotations(annotations: Mapping[str, object], plan_id: str) -> dict[str, object]:
+    """Merge evidence linked during investigation into every regenerated solver plan."""
+
+    global_support = annotations.get("__investigation_support__", {})
+    plan_support = annotations.get(plan_id)
+    if plan_support is None:
+        base_plan_id, separator, version = plan_id.rpartition("-")
+        if separator and len(version) == 12 and all(
+            character in "0123456789abcdef" for character in version
+        ):
+            plan_support = annotations.get(base_plan_id)
+    if plan_support is None:
+        plan_support = {}
+    global_payload = global_support if isinstance(global_support, dict) else {}
+    plan_payload = plan_support if isinstance(plan_support, dict) else {}
+    return {
+        **global_payload,
+        **plan_payload,
+        "claim_ids": list(
+            dict.fromkeys(
+                (
+                    *_tuple_strings(global_payload.get("claim_ids")),
+                    *_tuple_strings(plan_payload.get("claim_ids")),
+                )
+            )
+        ),
+        "evidence_ids": list(
+            dict.fromkeys(
+                (
+                    *_tuple_strings(global_payload.get("evidence_ids")),
+                    *_tuple_strings(plan_payload.get("evidence_ids")),
+                )
+            )
+        ),
+    }

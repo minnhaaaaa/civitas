@@ -299,7 +299,12 @@ class JuryEvaluator:
             ),
             _gate(
                 "critical_external_support",
-                not calculation.unsupported_critical_claim_ids,
+                (
+                    bool(request.supporting_claim_ids)
+                    if request.require_critical_external_support
+                    else True
+                )
+                and not calculation.unsupported_critical_claim_ids,
                 ReasonCode.CRITICAL_CLAIM_UNSUPPORTED,
             ),
             _gate(
@@ -360,10 +365,16 @@ def required_investigation(
     tasks: list[str] = []
     reason_set = set(reasons)
     if ReasonCode.CRITICAL_CLAIM_UNSUPPORTED in reason_set:
-        tasks.extend(
-            f"Obtain external support for critical claim {claim_id}."
-            for claim_id in calculation.unsupported_critical_claim_ids
-        )
+        if calculation.unsupported_critical_claim_ids:
+            tasks.extend(
+                f"Obtain external support for critical claim {claim_id}."
+                for claim_id in calculation.unsupported_critical_claim_ids
+            )
+        else:
+            tasks.append(
+                "Obtain external support for the candidate plan's material supplier, price, "
+                "capacity, and lead-time claims."
+            )
     if ReasonCode.CRITICAL_CONTRADICTION_UNRESOLVED in reason_set:
         tasks.extend(
             f"Resolve contradiction {item.contradiction_id} using stronger, current evidence."

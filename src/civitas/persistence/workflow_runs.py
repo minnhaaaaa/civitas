@@ -9,10 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from civitas.application.planning_inputs import ProviderPlanningInputAssembler
 from civitas.application.procurement_facade import WorkflowRunSnapshot
 from civitas.contracts.enums import WorkflowEventType
 from civitas.contracts.mcp_product import PlanningProgress, PlanningRunStatus, ProcurementGoal
 from civitas.contracts.optimization import OptimizationRequest
+from civitas.persistence.evidence import PostgreSQLEvidenceLedger
 from civitas.persistence.models import (
     OrganizationModel,
     PlanningBucketModel,
@@ -40,6 +42,8 @@ class PostgreSQLWorkflowRunStore:
         ids: IDGenerator,
         clock: Clock,
         policy_version: str,
+        input_assembler: ProviderPlanningInputAssembler | None = None,
+        evidence_ledger: PostgreSQLEvidenceLedger | None = None,
     ) -> None:
         if not policy_version.strip():
             raise ValueError("policy_version is required")
@@ -48,6 +52,10 @@ class PostgreSQLWorkflowRunStore:
         self._ids = ids
         self._clock = clock
         self._policy_version = policy_version
+        self._input_assembler = input_assembler
+        self._evidence_ledger = evidence_ledger
+        if (input_assembler is None) != (evidence_ledger is None):
+            raise ValueError("planning input assembly requires its durable evidence ledger")
 
     async def start(
         self,
@@ -60,6 +68,18 @@ class PostgreSQLWorkflowRunStore:
     ) -> WorkflowRunSnapshot:
         if optimization_request.planning_run_id != run_id:
             raise ValueError("optimization request belongs to a different run")
+        prepared = (
+            None
+            if self._input_assembler is None
+            else await self._input_assembler.prepare(
+                organization_id=context.organization_id,
+                run_id=run_id,
+                goal=goal,
+                base_request=optimization_request,
+            )
+        )
+        if prepared is not None:
+            optimization_request = prepared.optimization_request
         now = self._clock.now()
         checkpoint = self._workflow.start(
             planning_run_id=run_id, optimization_request=optimization_request
@@ -86,6 +106,15 @@ class PostgreSQLWorkflowRunStore:
                 # The mappings intentionally have no ORM relationships. Flush the
                 # parent explicitly before adding FK-dependent queue and bucket rows.
                 await session.flush()
+                if prepared is not None:
+                    assert self._evidence_ledger is not None
+                    for read, claims in prepared.reads_and_claims:
+                        await self._evidence_ledger.persist_read_in_session(
+                            session,
+                            planning_run_id=run_id,
+                            read=read,
+                            claims=claims,
+                        )
                 for sequence, (starts_at, ends_at) in enumerate(_planning_buckets(goal)):
                     session.add(
                         PlanningBucketModel(

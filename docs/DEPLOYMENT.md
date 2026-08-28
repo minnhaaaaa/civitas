@@ -28,20 +28,18 @@ docker compose -f deploy/compose.local.yaml --profile mcp up --build
 ```
 
 The MCP server and durable worker use the production composition and PostgreSQL
-checkpoint queue. The simulated provider remains an explicit offline test
-boundary and never authorizes real procurement. Provider reads and writes fail
-closed unless `CIVITAS_PROVIDER_FACTORY` names an organization-owned
+checkpoint queue. Local Compose defaults to the in-process, made-up operational
+MCP provider in `civitas.runtime.simulated_provider`; it supplies all six planning
+read capabilities and an idempotent mock purchase-order write, and refuses to
+start in production. Provider reads and writes fail closed unless
+`CIVITAS_PROVIDER_FACTORY` names a
 `module:callable` that returns `ProviderRuntimeDependencies`. Its planning
 connection must contain the credential-isolated read-only Dissent client; its
 execution connection is used only by guarded execution after approval,
 freshness, locking, and idempotency checks. Set
 `CIVITAS_LIVE_PROVIDER_REQUIRED=true` to make a missing factory a startup error.
-
-An external simulator process is optional and intentionally separate. Start it
-with `--profile provider-simulator` only after setting
-`CIVITAS_SIMULATED_PROVIDER_COMMAND` to the simulator server executable. Enabling
-that process does not connect it to Civitas; the configured provider factory
-still owns capability discovery and credential-scoped client construction.
+See [provider onboarding](PROVIDER_ONBOARDING.md) to replace the demo provider
+with a user's server.
 
 Worker leases renew while a transition is running. Configure
 `CIVITAS_WORKER_LEASE_SECONDS` for the expected provider latency and

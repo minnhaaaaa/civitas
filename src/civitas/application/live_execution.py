@@ -175,6 +175,33 @@ class PersistedApprovedExecutionAdapter:
             if jury is None:
                 raise ValueError("jury evaluation not found")
 
+            action = {
+                "kind": "execute_selected_procurement_plan",
+                "approval_receipt_id": receipt.id,
+                "selected_plan_hash": receipt.selected_plan_hash,
+            }
+            duplicate = await session.scalar(
+                select(ExecutionAuditModel).where(
+                    ExecutionAuditModel.organization_id == context.organization_id,
+                    ExecutionAuditModel.idempotency_key == request.idempotency_key,
+                )
+            )
+            if duplicate is not None:
+                if (
+                    duplicate.planning_run_id != run.id
+                    or duplicate.approved_plan_id != plan.id
+                    or duplicate.jury_decision_id != jury.id
+                    or duplicate.approval_policy_version != receipt.policy_version
+                    or duplicate.action != action
+                    or duplicate.approval_receipt_id != receipt.id
+                ):
+                    raise ValueError(
+                        "idempotency key was reused for a different execution request"
+                    )
+                return _execution_receipt_from_audit(
+                    duplicate, receipt.selected_plan_hash
+                ).model_copy(update={"duplicate": True})
+
         execution_request = ExecutionRequest(
             execution_id=self._ids.new_id("execution"),
             planning_run_id=run.id,
@@ -183,11 +210,7 @@ class PersistedApprovedExecutionAdapter:
             idempotency_key=request.idempotency_key,
             approval_policy_version=receipt.policy_version,
             requested_at=self._clock.now(),
-            action={
-                "kind": "execute_selected_procurement_plan",
-                "approval_receipt_id": receipt.id,
-                "selected_plan_hash": receipt.selected_plan_hash,
-            },
+            action=action,
         )
         execution_mcp = await self._execution_connections.connect(
             ExecutionProviderContext(

@@ -1,47 +1,68 @@
-# Civitas Codex judge demo
+# Civitas Codex MCP demo
 
-This is a deterministic, two-to-three-minute local demonstration of the target Codex/MCP workflow. It uses the simulated procurement provider and must not make a live model or procurement-provider call.
+This local demo uses a made-up operational MCP provider. It exposes typed reads
+for inventory, demand, supplier offers, lead times, warehouse capacity, and
+transport capacity, plus one idempotent purchase-order write. The simulator is
+refused when `CIVITAS_ENV=production`.
 
-## Reset
-
-Start from a clean local database and simulated provider state. The deployment profile supplied by the MCP server and worker workstreams owns the exact reset command. Do not reuse a previous run, approval receipt, or idempotency key.
-
-For the current offline scenario fixtures, run:
-
-```bash
-uv run pytest tests/golden/test_scenarios.py -q
-```
-
-The checked-in plugin configuration shows the intended STDIO command:
-
-```json
-{
-  "command": "uv",
-  "args": ["run", "python", "-m", "civitas.mcp_server"],
-  "env": {"CIVITAS_MCP_TRANSPORT": "stdio"}
-}
-```
-
-`civitas.mcp_server` deliberately fails closed until a deployment composition supplies a real `ProductService` and authenticated operator context. Do not add credentials to this file. Use the deterministic transport-to-facade test below to verify the complete local tool sequence; provision the production composition before attempting this script in Codex.
+## Start the complete stack
 
 ```bash
-uv run pytest tests/end_to_end/mcp/test_product_sequence.py -q
+cp .env.example .env
+# Replace every change-me value in .env.
+docker compose -f deploy/compose.local.yaml --profile mcp up -d --build
+docker compose -f deploy/compose.local.yaml --profile mcp ps
 ```
 
-## Judge script
+Migrations run first, `civitas-demo-seed` idempotently provisions the made-up
+organization/catalog, the durable worker starts, and then the authenticated
+Streamable HTTP server becomes ready at `http://127.0.0.1:8001/mcp`.
 
-1. In Codex, enable the repository-local `plugins/civitas` plugin and say: “Plan seven days of demand across the supplied warehouses while minimizing waste.”
-2. Confirm that Codex calls `plan_procurement_goal` with bounded typed inputs. It must not fabricate SKU IDs, warehouse IDs, quantities, or a decision.
-3. Let Codex poll `get_planning_run` until a material outcome. In the false-consensus fixture, observe investigation after stale shared supplier evidence, then replanning after clean-room Dissent retrieval.
-4. Ask for the decision. Codex calls `get_decision_summary` and reports the selected solver-validated plan, business impact, Integrity result, hard-gate result, and any material uncertainty. It offers the audit link only if you ask to inspect deeper evidence.
-5. Ask to execute. Codex calls `prepare_execution` with the exact selected plan hash and presents the short-lived challenge, bound totals, and expiry. Explicitly approve that exact challenge.
-6. Codex calls `approve_execution`, then `execute_approved_plan` with a new idempotency key. Verify that the returned execution receipt is authoritative.
-7. Simulate an uncertain client response and ask Codex to retry the same execution. It reuses the same receipt and idempotency key. Verify that Civitas returns the original execution receipt marked as a duplicate rather than creating a second procurement order.
+Run the black-box acceptance client inside the image:
 
-## Pass conditions
+```bash
+docker compose -f deploy/compose.local.yaml exec mcp-server \
+  python scripts/mcp_purchase_demo.py --auto-approve
+```
 
-- The workflow reaches the false-consensus investigation and replan path without conversationally bypassing Civitas.
-- Codex does not claim a quantity, Jury score, approval, or execution outcome that is absent from a tool response.
-- Execution follows `prepare_execution` → explicit operator approval → `approve_execution` → `execute_approved_plan`.
-- The identical retry returns the original receipt with duplicate status.
-- No credentials, user home directory, or developer-specific absolute path appears in the plugin configuration or demo transcript.
+`--auto-approve` is simulator-only. Without it the client stops after creating
+the immutable, short-lived approval challenge.
+
+## Connect Codex
+
+Export the same bearer token used by the server, then copy the table from
+`deploy/codex.config.toml.example` into `~/.codex/config.toml` or the trusted
+project's `.codex/config.toml`:
+
+```bash
+export CIVITAS_CODEX_BEARER_TOKEN='<the CIVITAS_BEARER_TOKEN value>'
+```
+
+Restart Codex and use `/mcp` to confirm `civitas` is connected. This follows the
+[official Codex MCP configuration](https://developers.openai.com/codex/mcp/):
+Streamable HTTP servers use `url`, and `bearer_token_env_var` supplies the
+Authorization bearer without committing it.
+
+Then type:
+
+> Use Civitas to satisfy tomorrow's demand for `sku-local` at
+> `warehouse-local`, minimizing cost and waste. Investigate and replan as
+> needed. Show me the selected plan and approval challenge before purchasing.
+
+Codex should call `plan_procurement_goal`, poll `get_planning_run`, and read
+`get_decision_summary`. It may autonomously investigate and replan. It must show
+the exact challenge and receive operator approval before calling
+`approve_execution` and `execute_approved_plan`. Reusing the same idempotency key
+returns the original receipt and never creates a second order.
+
+The required evaluation also covers a false-consensus case: clean-room Dissent
+must discover correlated or stale evidence and force a solver-owned replan
+before the approval gate. The duplicate retry remains bound to the same
+approval receipt and idempotency key.
+
+## Connect a user's provider
+
+Set `CIVITAS_PROVIDER_FACTORY=your_package.bootstrap:create_dependencies` and
+follow [provider onboarding](PROVIDER_ONBOARDING.md). This replaces the made-up
+provider while retaining the same evidence, Jury, approval, freshness, and
+execution controls.

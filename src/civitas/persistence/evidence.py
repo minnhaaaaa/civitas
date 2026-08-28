@@ -129,88 +129,105 @@ class PostgreSQLEvidenceLedger:
         claims: Sequence[TypedClaim],
     ) -> EvidenceRecord:
         async with self._sessions() as session, session.begin():
-            run = await session.get(PlanningRunModel, planning_run_id)
-            if run is None:
-                raise ValueError("planning run not found for evidence persistence")
-            identity = read.evidence.identity
-            source = await session.scalar(
-                select(SourceModel).where(
-                    SourceModel.organization_id == run.organization_id,
-                    SourceModel.canonical_source_id == identity.canonical_source_id,
-                )
+            return await self.persist_read_in_session(
+                session,
+                planning_run_id=planning_run_id,
+                read=read,
+                claims=claims,
             )
-            if source is None:
-                source = SourceModel(
-                    id=self._ids.new_id("source"),
-                    organization_id=run.organization_id,
-                    canonical_source_id=identity.canonical_source_id,
-                    canonical_source_type=identity.canonical_source_type,
-                    upstream_dataset=identity.canonical_source_id,
-                )
-                session.add(source)
-                await session.flush()
-            call = await session.get(MCPCallModel, read.call.call_id)
-            if call is None:
-                call = MCPCallModel(
-                    id=read.call.call_id,
-                    planning_run_id=planning_run_id,
-                    server=read.call.server_name,
-                    tool_name=read.call.tool_name,
-                    normalized_arguments=dict(read.call.arguments),
-                    retrieved_at=read.result.observed_at,
-                    response_sha256=identity.raw_response_sha256,
-                    raw_response=dict(read.result.payload),
-                )
-                session.add(call)
-            for claim in claims:
-                if await session.get(ClaimModel, claim.claim_id) is None:
-                    session.add(_claim_to_model(planning_run_id, claim))
+
+    async def persist_read_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        planning_run_id: str,
+        read: ProviderEvidenceRead,
+        claims: Sequence[TypedClaim],
+    ) -> EvidenceRecord:
+        """Persist evidence in an existing planning/execution transaction."""
+
+        run = await session.get(PlanningRunModel, planning_run_id)
+        if run is None:
+            raise ValueError("planning run not found for evidence persistence")
+        identity = read.evidence.identity
+        source = await session.scalar(
+            select(SourceModel).where(
+                SourceModel.organization_id == run.organization_id,
+                SourceModel.canonical_source_id == identity.canonical_source_id,
+            )
+        )
+        if source is None:
+            source = SourceModel(
+                id=self._ids.new_id("source"),
+                organization_id=run.organization_id,
+                canonical_source_id=identity.canonical_source_id,
+                canonical_source_type=identity.canonical_source_type,
+                upstream_dataset=identity.canonical_source_id,
+            )
+            session.add(source)
             await session.flush()
-            observation_version = identity.observation_version or ""
-            existing = await session.scalar(
-                select(EvidenceModel).where(
-                    EvidenceModel.planning_run_id == planning_run_id,
-                    EvidenceModel.source_id == source.id,
-                    EvidenceModel.raw_response_sha256 == identity.raw_response_sha256,
-                    EvidenceModel.observation_version == observation_version,
+        call = await session.get(MCPCallModel, read.call.call_id)
+        if call is None:
+            call = MCPCallModel(
+                id=read.call.call_id,
+                planning_run_id=planning_run_id,
+                server=read.call.server_name,
+                tool_name=read.call.tool_name,
+                normalized_arguments=dict(read.call.arguments),
+                retrieved_at=read.result.observed_at,
+                response_sha256=identity.raw_response_sha256,
+                raw_response=dict(read.result.payload),
+            )
+            session.add(call)
+        for claim in claims:
+            if await session.get(ClaimModel, claim.claim_id) is None:
+                session.add(_claim_to_model(planning_run_id, claim))
+        await session.flush()
+        observation_version = identity.observation_version or ""
+        existing = await session.scalar(
+            select(EvidenceModel).where(
+                EvidenceModel.planning_run_id == planning_run_id,
+                EvidenceModel.source_id == source.id,
+                EvidenceModel.raw_response_sha256 == identity.raw_response_sha256,
+                EvidenceModel.observation_version == observation_version,
+            )
+        )
+        actual = read.evidence
+        if existing is None:
+            existing = EvidenceModel(
+                id=actual.evidence_id,
+                planning_run_id=planning_run_id,
+                source_id=source.id,
+                mcp_call_id=call.id,
+                origin=actual.origin.value,
+                agent_id=actual.agent_id,
+                content_summary=actual.content_summary,
+                retrieved_at=identity.retrieved_at,
+                observation_version=observation_version,
+                raw_response_sha256=identity.raw_response_sha256,
+                raw_payload=None if actual.raw_payload is None else dict(actual.raw_payload),
+            )
+            session.add(existing)
+            await session.flush()
+        else:
+            actual = actual.model_copy(update={"evidence_id": existing.id})
+        for claim_id in actual.claim_ids:
+            link = await session.get(EvidenceClaimModel, (existing.id, claim_id))
+            if link is None:
+                session.add(EvidenceClaimModel(evidence_id=existing.id, claim_id=claim_id))
+        for parent_id in actual.derived_from:
+            session.add(
+                LineageEdgeModel(
+                    id=self._ids.new_id("lineage"),
+                    planning_run_id=planning_run_id,
+                    from_type="evidence",
+                    from_id=existing.id,
+                    relationship="DERIVED_FROM",
+                    to_type="evidence",
+                    to_id=parent_id,
                 )
             )
-            actual = read.evidence
-            if existing is None:
-                existing = EvidenceModel(
-                    id=actual.evidence_id,
-                    planning_run_id=planning_run_id,
-                    source_id=source.id,
-                    mcp_call_id=call.id,
-                    origin=actual.origin.value,
-                    agent_id=actual.agent_id,
-                    content_summary=actual.content_summary,
-                    retrieved_at=identity.retrieved_at,
-                    observation_version=observation_version,
-                    raw_response_sha256=identity.raw_response_sha256,
-                    raw_payload=None if actual.raw_payload is None else dict(actual.raw_payload),
-                )
-                session.add(existing)
-                await session.flush()
-            else:
-                actual = actual.model_copy(update={"evidence_id": existing.id})
-            for claim_id in actual.claim_ids:
-                link = await session.get(EvidenceClaimModel, (existing.id, claim_id))
-                if link is None:
-                    session.add(EvidenceClaimModel(evidence_id=existing.id, claim_id=claim_id))
-            for parent_id in actual.derived_from:
-                session.add(
-                    LineageEdgeModel(
-                        id=self._ids.new_id("lineage"),
-                        planning_run_id=planning_run_id,
-                        from_type="evidence",
-                        from_id=existing.id,
-                        relationship="DERIVED_FROM",
-                        to_type="evidence",
-                        to_id=parent_id,
-                    )
-                )
-            return actual
+        return actual
 
     async def record_dissent(
         self,

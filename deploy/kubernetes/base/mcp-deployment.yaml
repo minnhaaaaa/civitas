@@ -6,7 +6,9 @@ metadata:
     app.kubernetes.io/name: civitas-mcp
     app.kubernetes.io/component: mcp-server
 spec:
-  replicas: 2
+  # FastMCP Streamable HTTP sessions are process-local. Keep one replica until
+  # stateless mode or a shared session store is configured.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: civitas-mcp

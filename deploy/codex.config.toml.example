@@ -1,0 +1,6 @@
+[mcp_servers.civitas]
+url = "http://127.0.0.1:8001/mcp"
+bearer_token_env_var = "CIVITAS_CODEX_BEARER_TOKEN"
+required = true
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
