@@ -17,6 +17,9 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.scripts]
+civitas-mcp = "civitas.runtime.main:main"
+
 [dependency-groups]
 dev = [
   "hypothesis>=6.135,<7",

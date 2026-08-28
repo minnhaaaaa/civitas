@@ -1,22 +1,12 @@
-"""Run the configured authenticated Streamable HTTP MCP server command."""
+"""Run the composed authenticated Streamable HTTP MCP server."""
 
 from __future__ import annotations
 
-import os
-import shlex
-import sys
+from civitas.runtime.main import main as runtime_main
 
 
 def main() -> int:
-    command = os.getenv("CIVITAS_MCP_SERVER_COMMAND")
-    if not command:
-        print("CIVITAS_MCP_SERVER_COMMAND is required for the MCP server.", file=sys.stderr)
-        return 78
-    parts = shlex.split(command)
-    if not parts:
-        return 78
-    os.execvp(parts[0], parts)
-    return 127
+    return runtime_main()
 
 
 if __name__ == "__main__":

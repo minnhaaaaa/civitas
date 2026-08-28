@@ -169,15 +169,17 @@ It must not create an alternative execution path. Any approval initiated from th
 
 ## Delivery status
 
-The current repository implements the versioned MCP product contracts, inbound
-MCP adapter, transport-neutral procurement facade, core workflow, demonstration
-API, guarded execution services, SSE events, and optional audit viewer. The
-inbound adapter exposes the tool surface above and is covered by deterministic
-transport-to-facade integration tests.
+The inbound MCP surface is implemented and has a deployable composition entry
+point: `civitas-mcp` (equivalently `python -m civitas.mcp_server`). It validates
+database, approval-secret, bearer-identity, organization, and operator bindings;
+then assembles the facade, OR-Tools workflow, fail-closed Jury, persisted approval
+service, identity resolver, and authenticated Streamable HTTP transport.
 
-It is not yet a deployable live procurement service. The remaining work is a
-production composition root that supplies authenticated identity, PostgreSQL
-workflow persistence, a durable worker, approved outbound provider adapters,
-and real execution credentials. Until that composition is delivered,
-documentation and demonstrations must present Codex/MCP as a tested interface
-with deterministic fakes—not as a live provider-connected deployment.
+The composition intentionally exposes narrow replacement seams for the remaining
+live workstreams. Until their branches are integrated, workflow runs use the
+documented inline non-durable adapter, evidence/Dissent absence fails the Jury
+closed, and outbound provider execution is rejected. Therefore this branch is a
+real inbound service process but is not yet a live-buying release. PostgreSQL
+checkpointing/worker leasing, operational provider adapters, persisted guarded
+execution, and production OAuth identity must replace those seams before that
+claim is made.
