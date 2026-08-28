@@ -18,7 +18,7 @@ from civitas.contracts import (
 )
 from civitas.ports.clock import Clock
 from civitas.ports.ids import IDGenerator
-from civitas.workflow import ParliamentWorkflow, WorkflowLimits
+from civitas.workflow import InvestigationOutcome, ParliamentWorkflow, WorkflowLimits
 
 
 class FakeClock(Clock):
@@ -290,3 +290,56 @@ async def test_agents_never_authorize_quantities_directly() -> None:
     assert all(
         "quantity" not in proposal.model_dump() for proposal in checkpoint.parliament.proposals
     )
+
+
+@pytest.mark.asyncio
+async def test_unavailable_required_investigation_escalates() -> None:
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+
+    class UnavailableInvestigator:
+        async def investigate(self, checkpoint: object, *, limits: object) -> InvestigationOutcome:
+            del checkpoint, limits
+            return InvestigationOutcome(
+                optimization_request=_request(),
+                unavailable_tasks=("tool_budget:get_lead_times",),
+            )
+
+    workflow = ParliamentWorkflow(
+        optimizer=FakeOptimizer([_result()]),
+        jury=FakeJury([_evaluation("investigate", required=("verify lead time",))]),
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        investigator=UnavailableInvestigator(),
+    )
+
+    result = await workflow.run(
+        workflow.start(planning_run_id="run-1", optimization_request=_request()),
+        limits=WorkflowLimits(
+            max_cycles=2,
+            max_tool_calls=2,
+            deadline_at=now + timedelta(hours=1),
+        ),
+    )
+
+    assert result.checkpoint.final_state == "escalate"
+    assert result.checkpoint.unavailable_investigation_tasks
+
+
+@pytest.mark.asyncio
+async def test_empty_solver_result_escalates_instead_of_crashing() -> None:
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    empty = OptimizationResult(planning_run_id="run-1", alternatives=())
+    workflow = ParliamentWorkflow(
+        optimizer=FakeOptimizer([empty]),
+        jury=FakeJury([_evaluation("approve")]),
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+    )
+
+    result = await workflow.run(
+        workflow.start(planning_run_id="run-1", optimization_request=_request()),
+        limits=WorkflowLimits(max_cycles=2, deadline_at=now + timedelta(hours=1)),
+    )
+
+    assert result.checkpoint.final_state == "escalate"
+    assert result.checkpoint.optimization_result == empty

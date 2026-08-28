@@ -46,6 +46,9 @@ class InvestigationPayload(Contract):
     phase: WorkflowPhase
     cycle: int
     required_investigation: tuple[str, ...]
+    completed_task_ids: tuple[str, ...] = ()
+    unavailable_tasks: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
 
 
 class TerminalPayload(Contract):

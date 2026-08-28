@@ -322,7 +322,11 @@ class EvidenceModel(TimestampMixin, Base):
     __tablename__ = "evidence"
     __table_args__ = (
         UniqueConstraint(
-            "source_id", "raw_response_sha256", "observation_version", name="uq_evidence_identity"
+            "planning_run_id",
+            "source_id",
+            "raw_response_sha256",
+            "observation_version",
+            name="uq_evidence_identity",
         ),
         CheckConstraint("origin IN ('external', 'agent_derived')", name="ck_evidence_origin"),
     )
@@ -447,6 +451,27 @@ class JuryDecisionModel(TimestampMixin, Base):
     final_state: Mapped[str] = mapped_column(String(32), nullable=False)
     reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     per_claim_contributions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class DissentInvestigationModel(TimestampMixin, Base):
+    """Append-only clean-room phase audit; raw evidence remains in evidence tables."""
+
+    __tablename__ = "dissent_investigations"
+    __table_args__ = (
+        UniqueConstraint("planning_run_id", "cycle_key", "phase", name="uq_dissent_phase_audit"),
+        CheckConstraint(
+            "phase IN ('plan_recorded', 'fresh_retrieval_complete', "
+            "'comparison_complete', 'failed')",
+            name="ck_dissent_investigations_phase",
+        ),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    planning_run_id: Mapped[str] = mapped_column(
+        ForeignKey("planning_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cycle_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    phase: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 class WorkflowEventModel(Base):

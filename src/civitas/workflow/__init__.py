@@ -1,6 +1,7 @@
 """Bounded autonomous workflow orchestration."""
 
 from civitas.workflow.models import (
+    InvestigationOutcome,
     ParliamentChallenge,
     ParliamentConcession,
     ParliamentContext,
@@ -15,6 +16,7 @@ from civitas.workflow.models import (
 from civitas.workflow.orchestrator import ParliamentWorkflow
 
 __all__ = [
+    "InvestigationOutcome",
     "ParliamentChallenge",
     "ParliamentConcession",
     "ParliamentContext",

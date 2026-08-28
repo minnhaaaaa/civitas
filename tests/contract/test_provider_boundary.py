@@ -24,6 +24,7 @@ from civitas.integrations import (
     clean_room_namespace,
 )
 from civitas.ports.providers import ProviderCredential
+from civitas.runtime import ProviderPlanningRuntime
 
 
 def registration() -> ProviderRegistration:
@@ -167,6 +168,11 @@ async def test_connections_isolate_credentials_and_dissent_is_read_only() -> Non
 
     with pytest.raises(MCPAccessError, match="write access denied"):
         await connections.dissent.invoke(write_call())
+
+    planning_runtime = ProviderPlanningRuntime.from_connections(connections)
+    assert planning_runtime.evidence is connections.evidence
+    assert planning_runtime.dissent is connections.dissent_evidence
+    assert planning_runtime.dissent_namespace == connections.dissent.namespace
 
     result = await connections.execution.invoke(write_call())
     assert result.payload["status"] == "created"

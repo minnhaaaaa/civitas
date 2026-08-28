@@ -32,6 +32,19 @@ class WorkflowLimits(Contract):
     deadline_at: datetime
 
 
+class InvestigationOutcome(Contract):
+    """Durable result of one bounded evidence-retrieval round."""
+
+    optimization_request: OptimizationRequest
+    completed_task_ids: tuple[str, ...] = ()
+    unavailable_tasks: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    evidence_fingerprints: tuple[str, ...] = ()
+    canonical_source_groups: tuple[str, ...] = ()
+    tool_calls_used: int = Field(default=0, ge=0)
+    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
+
+
 class PlanAssessment(Contract):
     plan_id: str
     score: Decimal
@@ -89,10 +102,14 @@ class WorkflowCheckpoint(Contract):
     parliament: ParliamentSession | None = None
     jury_evaluation: JuryEvaluation | None = None
     seen_evidence_ids: tuple[str, ...] = ()
+    seen_evidence_fingerprints: tuple[str, ...] = ()
+    seen_canonical_source_groups: tuple[str, ...] = ()
     repeated_evidence_hits: int = Field(default=0, ge=0)
     tool_calls_used: int = Field(default=0, ge=0)
     estimated_cost_used: Decimal = Field(default=Decimal("0"), ge=0)
     investigation_backlog: tuple[str, ...] = ()
+    completed_investigation_tasks: tuple[str, ...] = ()
+    unavailable_investigation_tasks: tuple[str, ...] = ()
     final_state: str | None = None
     completed: bool = False
 

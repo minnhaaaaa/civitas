@@ -5,12 +5,14 @@ from datetime import UTC
 
 import pytest
 
+from civitas.application.investigation import JuryDirectedInvestigator
 from civitas.application.live_execution import PersistedApprovedExecutionAdapter
 from civitas.contracts.tools import MCPToolCall, MCPToolResult
-from civitas.integrations import ExecutionProviderContext
+from civitas.integrations import ExecutionProviderContext, clean_room_namespace
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 from civitas.runtime import (
     ProviderExecutionRuntime,
+    ProviderPlanningRuntime,
     RuntimeSettings,
     SettingsError,
     build_runtime,
@@ -28,6 +30,12 @@ class UnusedExecutionConnections:
     async def connect(self, context: ExecutionProviderContext) -> UnusedProviderReads:
         del context
         raise AssertionError("composition must not connect providers")
+
+
+class UnusedEvidenceReader:
+    async def read(self, **kwargs: object) -> object:
+        del kwargs
+        raise AssertionError("composition must not read providers")
 
 
 def _settings() -> RuntimeSettings:
@@ -118,6 +126,24 @@ async def test_complete_provider_dependencies_enable_persisted_guarded_execution
     )
     try:
         assert isinstance(runtime.executions, PersistedApprovedExecutionAdapter)
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_planning_provider_enables_durable_investigation_composition() -> None:
+    reader = UnusedEvidenceReader()
+    runtime = build_runtime(
+        _settings(),
+        provider_planning=ProviderPlanningRuntime(
+            evidence=reader,  # type: ignore[arg-type]
+            dissent=reader,  # type: ignore[arg-type]
+            dissent_namespace=clean_room_namespace("run-1-dissent"),
+            server_name="provider-1",
+        ),
+    )
+    try:
+        assert isinstance(runtime.workflow._investigator, JuryDirectedInvestigator)
     finally:
         await runtime.close()
 

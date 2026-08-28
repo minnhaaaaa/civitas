@@ -222,6 +222,7 @@ class ProviderEvidenceClient(MCPPort):
 class ProviderConnections:
     evidence: ProviderEvidenceClient
     dissent: DissentMCPClient
+    dissent_evidence: ProviderEvidenceClient
     execution: ContextBoundExecutionMCPClient
     execution_context: ExecutionProviderContext
 
@@ -278,9 +279,11 @@ class ProviderOnboarder:
             client=MCPClient(transport=planning_transport, policy=DEFAULT_READ_POLICY),
             manifest=manifest,
         )
+        dissent_client = DissentMCPClient(transport=dissent_transport, namespace=namespace)
         return ProviderConnections(
             evidence=evidence_client,
-            dissent=DissentMCPClient(transport=dissent_transport, namespace=namespace),
+            dissent=dissent_client,
+            dissent_evidence=ProviderEvidenceClient(client=dissent_client, manifest=manifest),
             execution=ContextBoundExecutionMCPClient(
                 client=ExecutionMCPClient(
                     transport=execution_transport, policy=DEFAULT_EXECUTION_POLICY

@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from civitas.application.investigation import (
+    DurableCleanRoomJury,
+    EvidenceReader,
+    JuryDirectedInvestigator,
+)
 from civitas.application.live_execution import (
     ExecutionProviderConnectionFactory,
     PersistedApprovalAdapter,
@@ -30,12 +35,17 @@ from civitas.identity.audit import (
     NullAuthenticationAuditSink,
 )
 from civitas.identity.context import AuthenticatedPrincipal, derive_operator_context
+from civitas.integrations.mcp import CleanRoomNamespace
+from civitas.integrations.providers import ProviderConnections
 from civitas.mcp_server import InboundMCPServer, StaticIdentityProvider
 from civitas.optimization.adapter import OrToolsOptimizer
 from civitas.persistence.database import Database
+from civitas.persistence.evidence import PostgreSQLEvidenceLedger
 from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
 from civitas.persistence.workflow_runs import PostgreSQLWorkflowRunStore
 from civitas.ports.identity import OperatorContext
+from civitas.ports.investigation import PlanningInvestigator
+from civitas.ports.jury import JuryPort
 from civitas.ports.mcp import MCPPort
 from civitas.runtime.adapters import (
     DisabledExecutionPort,
@@ -59,6 +69,31 @@ class ProviderExecutionRuntime:
     def __post_init__(self) -> None:
         if not self.server_name.strip():
             raise ValueError("provider server name is required")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderPlanningRuntime:
+    """Read-only planning and isolated Dissent connections from Agent 3."""
+
+    evidence: EvidenceReader
+    dissent: EvidenceReader
+    dissent_namespace: CleanRoomNamespace
+    server_name: str
+
+    def __post_init__(self) -> None:
+        if not self.server_name.strip():
+            raise ValueError("provider server name is required")
+
+    @classmethod
+    def from_connections(cls, connections: ProviderConnections) -> ProviderPlanningRuntime:
+        """Bind the exact clean-room namespace and credential-isolated Agent 3 clients."""
+
+        return cls(
+            evidence=connections.evidence,
+            dissent=connections.dissent_evidence,
+            dissent_namespace=connections.dissent.namespace,
+            server_name=connections.evidence.manifest.server_name,
+        )
 
 
 @dataclass(slots=True)
@@ -96,6 +131,7 @@ def build_runtime(
     workflow_runs: WorkflowRunStore | None = None,
     executions: ApprovedExecutionPort | None = None,
     provider_execution: ProviderExecutionRuntime | None = None,
+    provider_planning: ProviderPlanningRuntime | None = None,
     rate_limiter: RateLimiter | None = None,
     authentication_audit: AuthenticationAuditSink | None = None,
 ) -> RuntimeApplication:
@@ -108,8 +144,35 @@ def build_runtime(
     clock = SystemClock()
     ids = UUIDGenerator()
     optimizer = OrToolsOptimizer()
-    jury = FailClosedJuryPort(ids=ids, clock=clock)
-    workflow = ParliamentWorkflow(optimizer=optimizer, jury=jury, ids=ids, clock=clock)
+    investigator: PlanningInvestigator | None = None
+    jury: JuryPort
+    if provider_planning is None:
+        jury = FailClosedJuryPort(ids=ids, clock=clock)
+    else:
+        evidence_ledger = PostgreSQLEvidenceLedger(database.sessions, ids=ids)
+        jury = DurableCleanRoomJury(
+            dissent_reader=provider_planning.dissent,
+            ledger=evidence_ledger,
+            ids=ids,
+            clock=clock,
+            server_name=provider_planning.server_name,
+            organization_id=settings.organization_id,
+            clean_room_namespace=provider_planning.dissent_namespace,
+        )
+        investigator = JuryDirectedInvestigator(
+            reader=provider_planning.evidence,
+            ledger=evidence_ledger,
+            ids=ids,
+            server_name=provider_planning.server_name,
+            organization_id=settings.organization_id,
+        )
+    workflow = ParliamentWorkflow(
+        optimizer=optimizer,
+        jury=jury,
+        ids=ids,
+        clock=clock,
+        investigator=investigator,
+    )
     checkpoints = PostgreSQLWorkflowCheckpointStore(database.sessions)
     run_store = workflow_runs or PostgreSQLWorkflowRunStore(
         sessions=database.sessions,
@@ -200,10 +263,14 @@ def build_runtime(
     )
 
 
-def build_worker(settings: RuntimeSettings) -> DurableWorkflowWorker:
+def build_worker(
+    settings: RuntimeSettings,
+    *,
+    provider_planning: ProviderPlanningRuntime | None = None,
+) -> DurableWorkflowWorker:
     """Build a worker that reads each run's durable autonomy limits."""
 
-    runtime = build_runtime(settings)
+    runtime = build_runtime(settings, provider_planning=provider_planning)
     worker_id = settings.worker_id or UUIDGenerator().new_id("worker")
     return DurableWorkflowWorker(
         worker_id=worker_id,
