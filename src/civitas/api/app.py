@@ -39,8 +39,10 @@ from civitas.evidence import (
 )
 from civitas.execution.service import GuardedExecutionService, RevalidationSnapshot
 from civitas.integrations import (
+    DEFAULT_EXECUTION_POLICY,
     DEFAULT_PROCUREMENT_POLICY,
     DissentMCPClient,
+    ExecutionMCPClient,
     MCPClient,
     ToolEvidenceMapping,
     clean_room_namespace,
@@ -256,8 +258,12 @@ class FalseConsensusScenarioState:
             transport=self.audit_server,
             namespace=clean_room_namespace(run_id),
         )
+        self.execution_client = ExecutionMCPClient(
+            transport=self.public_server,
+            policy=DEFAULT_EXECUTION_POLICY,
+        )
         self.execution = GuardedExecutionService(
-            mcp=self.public_client,
+            mcp=self.execution_client,
             ids=ids,
             clock=clock,
             server_name="mock-procurement",

@@ -14,7 +14,7 @@ from civitas.contracts import (
     Quantity,
 )
 from civitas.execution import GuardedExecutionService, RevalidationSnapshot
-from civitas.integrations import DEFAULT_PROCUREMENT_POLICY, MCPClient
+from civitas.integrations import DEFAULT_EXECUTION_POLICY, ExecutionMCPClient
 from civitas.ports.clock import Clock
 from civitas.ports.ids import IDGenerator
 
@@ -80,7 +80,7 @@ async def test_guarded_execution_succeeds_then_marks_duplicate() -> None:
         warehouse_capacity=[{"warehouse_id": "warehouse-north", "remaining_capacity_units": 20}],
     )
     service = GuardedExecutionService(
-        mcp=MCPClient(transport=server, policy=DEFAULT_PROCUREMENT_POLICY),
+        mcp=ExecutionMCPClient(transport=server, policy=DEFAULT_EXECUTION_POLICY),
         ids=CounterIDs(),
         clock=FixedClock(now),
         server_name="mock-procurement",
@@ -118,7 +118,7 @@ async def test_guarded_execution_fails_when_freshness_changes() -> None:
         warehouse_capacity=[{"warehouse_id": "warehouse-north", "remaining_capacity_units": 20}],
     )
     service = GuardedExecutionService(
-        mcp=MCPClient(transport=server, policy=DEFAULT_PROCUREMENT_POLICY),
+        mcp=ExecutionMCPClient(transport=server, policy=DEFAULT_EXECUTION_POLICY),
         ids=CounterIDs(),
         clock=FixedClock(now),
         server_name="mock-procurement",

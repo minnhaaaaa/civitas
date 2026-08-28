@@ -9,6 +9,12 @@ from civitas.ports.mcp import MCPPort
 from civitas.ports.model_provider import ModelProvider
 from civitas.ports.optimizer import Optimizer
 from civitas.ports.product_service import ProductService
+from civitas.ports.providers import (
+    OperationalProviderTransport,
+    ProviderCredential,
+    ProviderCredentialResolver,
+    ProviderTransportFactory,
+)
 from civitas.ports.repositories import Repository, UnitOfWork
 
 __all__ = [
@@ -19,9 +25,13 @@ __all__ = [
     "JuryPort",
     "MCPPort",
     "ModelProvider",
+    "OperationalProviderTransport",
     "OperatorContext",
     "Optimizer",
     "ProductService",
+    "ProviderCredential",
+    "ProviderCredentialResolver",
+    "ProviderTransportFactory",
     "Repository",
     "UnitOfWork",
 ]

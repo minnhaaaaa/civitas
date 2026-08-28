@@ -6,11 +6,14 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from civitas.contracts.providers import ProviderCapabilityManifest, ProviderToolCapability
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall, MCPToolResult
 
 
 @dataclass(slots=True)
 class MockProcurementMCPServer:
+    provider_id: str = "mock-procurement"
+    server_name: str = "mock-procurement"
     inventory: list[dict[str, object]] = field(default_factory=list)
     demand: list[dict[str, object]] = field(default_factory=list)
     supplier_offers: list[dict[str, object]] = field(default_factory=list)
@@ -19,6 +22,36 @@ class MockProcurementMCPServer:
     transport_capacity: list[dict[str, object]] = field(default_factory=list)
     observation_version: str = "mock-v1"
     _write_results: dict[str, MCPToolResult] = field(default_factory=dict, init=False)
+
+    async def discover_capabilities(self) -> ProviderCapabilityManifest:
+        read_tools = (
+            "get_inventory",
+            "get_demand",
+            "get_supplier_offers",
+            "get_lead_times",
+            "get_warehouse_capacity",
+            "get_transport_capacity",
+        )
+        write_tools = ("create_procurement_order", "reserve_inventory")
+        return ProviderCapabilityManifest(
+            provider_id=self.provider_id,
+            server_name=self.server_name,
+            protocol_version="2026-08-01",
+            discovered_at=datetime.now(UTC),
+            tools=tuple(
+                ProviderToolCapability(name=name, access_mode=MCPAccessMode.READ)
+                for name in read_tools
+            )
+            + tuple(
+                ProviderToolCapability(
+                    name=name,
+                    access_mode=MCPAccessMode.WRITE,
+                    idempotent=True,
+                )
+                for name in write_tools
+            ),
+            canonical_source_groups={name: f"mock-dataset:{name}" for name in read_tools},
+        )
 
     async def invoke(self, call: MCPToolCall) -> MCPToolResult:
         if call.tool_name == "get_inventory":
