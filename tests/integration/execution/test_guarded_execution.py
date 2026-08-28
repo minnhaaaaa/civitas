@@ -9,14 +9,21 @@ import pytest
 from sqlalchemy import select
 from tools.mock_mcp import MockProcurementMCPServer
 
+from civitas.application.live_execution import PersistedApprovedExecutionAdapter
 from civitas.application.plan_identity import approved_totals, selected_plan_hash
 from civitas.approval.service import ApprovalService, ChangedPlanError
 from civitas.contracts.claims import ClaimScope, TypedClaim
 from civitas.contracts.enums import EvidenceOrigin, ExecutionState, FeasibilityStatus
 from civitas.contracts.evidence import EvidenceIdentity, EvidenceRecord
 from civitas.contracts.execution import ExecutionRequest
-from civitas.contracts.mcp_product import ApprovedTotals
+from civitas.contracts.mcp_product import ApprovedTotals, ExecuteApprovedPlanRequest
 from civitas.execution.guarded import GuardedExecutionService, RefreshBundle, _load_plan
+from civitas.integrations import (
+    DEFAULT_EXECUTION_POLICY,
+    ContextBoundExecutionMCPClient,
+    ExecutionMCPClient,
+    ExecutionProviderContext,
+)
 from civitas.persistence.database import Database
 from civitas.persistence.models import (
     CandidatePlanModel,
@@ -58,6 +65,22 @@ class StaticRefresher:
 
     async def refresh(self, **_: object) -> RefreshBundle:
         return self._bundle
+
+
+class CapturingExecutionConnections:
+    def __init__(self, server: MockProcurementMCPServer) -> None:
+        self._server = server
+        self.contexts: list[ExecutionProviderContext] = []
+
+    async def connect(self, context: ExecutionProviderContext) -> ContextBoundExecutionMCPClient:
+        self.contexts.append(context)
+        return ContextBoundExecutionMCPClient(
+            client=ExecutionMCPClient(
+                transport=self._server,
+                policy=DEFAULT_EXECUTION_POLICY,
+            ),
+            execution_context=context,
+        )
 
 
 def identifier(prefix: str) -> str:
@@ -620,6 +643,13 @@ async def approved_receipt_for(
     return approvals, context, receipt.receipt_id
 
 
+async def _selected_hash_for(database: Database, plan_id: str) -> str:
+    async with database.sessions() as session:
+        plan = await _load_plan(session, plan_id)
+    assert plan is not None
+    return selected_plan_hash(plan)
+
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_persisted_receipt_is_bound_to_execution_and_write_ledger(
     database: Database,
@@ -667,6 +697,14 @@ async def test_persisted_receipt_is_bound_to_execution_and_write_ledger(
         request,
         context=context,
         approval_receipt_id=receipt_id,
+        write_mcp=ContextBoundExecutionMCPClient(
+            client=ExecutionMCPClient(transport=server, policy=DEFAULT_EXECUTION_POLICY),
+            execution_context=ExecutionProviderContext(
+                execution_id=request.execution_id,
+                approval_receipt_id=receipt_id,
+                approved_plan_hash=(await _selected_hash_for(database, state[1])),
+            ),
+        ),
     )
 
     assert outcome.result.state is ExecutionState.SUCCEEDED
@@ -749,3 +787,66 @@ async def test_receipt_for_different_selected_plan_fails_before_provider_write(
         )
 
     assert server._write_results == {}
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_product_adapter_builds_provider_connection_from_persisted_receipt(
+    database: Database,
+) -> None:
+    state = await seed_execution_state(database)
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    approvals, context, receipt_id = await approved_receipt_for(database, state=state, now=now)
+    offer_key = f"{state[6]}:{state[4]}:{state[5]}"
+    server = MockProcurementMCPServer()
+    connections = CapturingExecutionConnections(server)
+    guarded = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=server,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        approvals=approvals,
+        refresher=StaticRefresher(
+            RefreshBundle(
+                claims=(
+                    claim(
+                        claim_id="claim-product-binding",
+                        predicate="unit_price",
+                        observed_at=now,
+                        organization_id=state[3],
+                        sku_id=state[4],
+                        warehouse_id=state[5],
+                    ),
+                ),
+                evidence=(
+                    evidence(
+                        evidence_id="e-product-binding",
+                        claim_id="claim-product-binding",
+                        observed_at=now,
+                    ),
+                ),
+                observed_unit_prices={offer_key: Decimal("5")},
+                constraints={f"offer:{offer_key}:available": Decimal("10")},
+            )
+        ),
+    )
+    adapter = PersistedApprovedExecutionAdapter(
+        sessions=database.sessions,
+        guarded=guarded,
+        execution_connections=connections,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+    )
+
+    result = await adapter.execute(
+        context=context,
+        request=ExecuteApprovedPlanRequest(
+            receipt_id=receipt_id,
+            idempotency_key=identifier("product-idem"),
+        ),
+    )
+
+    assert result.execution_state is ExecutionState.SUCCEEDED
+    assert result.selected_plan_hash == await _selected_hash_for(database, state[1])
+    assert len(connections.contexts) == 1
+    assert connections.contexts[0].approval_receipt_id == receipt_id
+    assert connections.contexts[0].approved_plan_hash == result.selected_plan_hash

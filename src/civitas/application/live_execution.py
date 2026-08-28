@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -18,7 +20,10 @@ from civitas.contracts.mcp_product import (
     ExecutionAuditEntry,
     ExecutionReceipt,
 )
+from civitas.contracts.providers import ProviderRegistration
 from civitas.execution.guarded import GuardedExecutionService
+from civitas.integrations.mcp import clean_room_namespace
+from civitas.integrations.providers import ExecutionProviderContext, ProviderOnboarder
 from civitas.persistence.models import (
     ApprovalReceiptModel,
     CandidatePlanModel,
@@ -30,6 +35,34 @@ from civitas.persistence.models import (
 from civitas.ports.clock import Clock
 from civitas.ports.identity import OperatorContext
 from civitas.ports.ids import IDGenerator
+from civitas.ports.mcp import MCPPort
+
+
+class ExecutionProviderConnectionFactory(Protocol):
+    """Create one execution-only provider client for an approved action."""
+
+    async def connect(self, context: ExecutionProviderContext) -> MCPPort: ...
+
+
+class OnboardedExecutionConnectionFactory:
+    """Connect Agent 3's isolated execution credential with immutable binding."""
+
+    def __init__(
+        self,
+        *,
+        onboarder: ProviderOnboarder,
+        registration: ProviderRegistration,
+    ) -> None:
+        self._onboarder = onboarder
+        self._registration = registration
+
+    async def connect(self, context: ExecutionProviderContext) -> MCPPort:
+        connections = await self._onboarder.connect(
+            registration=self._registration,
+            namespace=clean_room_namespace(f"execution-{context.execution_id}"),
+            execution_context=context,
+        )
+        return connections.execution
 
 
 class PersistedApprovalAdapter:
@@ -76,11 +109,13 @@ class PersistedApprovedExecutionAdapter:
         *,
         sessions: async_sessionmaker[AsyncSession],
         guarded: GuardedExecutionService,
+        execution_connections: ExecutionProviderConnectionFactory,
         ids: IDGenerator,
         clock: Clock,
     ) -> None:
         self._sessions = sessions
         self._guarded = guarded
+        self._execution_connections = execution_connections
         self._ids = ids
         self._clock = clock
 
@@ -139,10 +174,18 @@ class PersistedApprovedExecutionAdapter:
                 "selected_plan_hash": receipt.selected_plan_hash,
             },
         )
+        execution_mcp = await self._execution_connections.connect(
+            ExecutionProviderContext(
+                execution_id=execution_request.execution_id,
+                approval_receipt_id=receipt.id,
+                approved_plan_hash=receipt.selected_plan_hash,
+            )
+        )
         outcome = await self._guarded.execute(
             execution_request,
             context=context,
             approval_receipt_id=receipt.id,
+            write_mcp=execution_mcp,
         )
         return _execution_receipt(
             outcome.result,

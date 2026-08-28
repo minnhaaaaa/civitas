@@ -6,6 +6,10 @@ Branch: `live/approval-execution`
 
 - Product-facing persisted approval and execution adapters in
   `civitas.application.live_execution`.
+- Agent 3 provider-boundary integration through a per-execution connection
+  factory. The execution credential is connected only after the persisted
+  receipt is loaded, and every write carries protected `_civitas_execution`
+  metadata for the execution ID, receipt ID, and exact selected-plan hash.
 - One canonical selected-plan hash and exact approval-total calculation shared
   by the facade and execution boundary.
 - Approval-receipt consumption inside the guarded execution transaction,
@@ -26,6 +30,12 @@ pass the same service to `GuardedExecutionService(approvals=...)`. Wrap the
 guarded service with `PersistedApprovedExecutionAdapter`; those two adapters
 implement the facade's `ApprovalPort` and `ApprovedExecutionPort`.
 
+Construct `OnboardedExecutionConnectionFactory` with Agent 3's
+`ProviderOnboarder` and `ProviderRegistration`, then pass it as
+`execution_connections` to `PersistedApprovedExecutionAdapter`. The adapter
+derives `ExecutionProviderContext` from the persisted receipt; callers cannot
+provide or override the provider binding metadata.
+
 The provider adapter supplied to guarded execution must enforce write
 idempotency remotely as well as locally. Provider writes remain reachable only
 through this execution service.
@@ -44,6 +54,6 @@ through this execution service.
 
 - `ruff check`: passed
 - `mypy` on changed execution/approval modules: passed
-- unit suite: 58 passed
-- PostgreSQL guarded-execution integration suite: 9 passed
+- unit plus provider/security contract suite: 75 passed
+- PostgreSQL guarded-execution integration suite: 10 passed
 - Alembic: one head (`2c6d0a76f945`)

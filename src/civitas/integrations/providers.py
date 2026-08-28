@@ -32,6 +32,7 @@ from civitas.integrations.mcp import (
     ToolEvidenceMapping,
     evidence_from_tool_result,
 )
+from civitas.ports.mcp import MCPPort
 from civitas.ports.providers import (
     OperationalProviderTransport,
     ProviderCredential,
@@ -73,6 +74,40 @@ class ExecutionProviderContext:
             for value in (self.execution_id, self.approval_receipt_id, self.approved_plan_hash)
         ):
             raise ValueError("execution writes require execution, receipt, and plan identities")
+
+
+class ContextBoundExecutionMCPClient(MCPPort):
+    """Attach immutable Civitas approval identity to every provider write."""
+
+    _BINDING_ARGUMENT = "_civitas_execution"
+
+    def __init__(
+        self,
+        *,
+        client: ExecutionMCPClient,
+        execution_context: ExecutionProviderContext,
+    ) -> None:
+        self._client = client
+        self.execution_context = execution_context
+
+    async def invoke(self, call: MCPToolCall) -> MCPToolResult:
+        if call.access_mode is not MCPAccessMode.WRITE:
+            return await self._client.invoke(call)
+        if self._BINDING_ARGUMENT in call.arguments:
+            raise MCPAccessError("execution binding metadata is owned by Civitas")
+        bound_call = call.model_copy(
+            update={
+                "arguments": {
+                    **call.arguments,
+                    self._BINDING_ARGUMENT: {
+                        "execution_id": self.execution_context.execution_id,
+                        "approval_receipt_id": self.execution_context.approval_receipt_id,
+                        "selected_plan_hash": self.execution_context.approved_plan_hash,
+                    },
+                }
+            }
+        )
+        return await self._client.invoke(bound_call)
 
 
 class ResilientProviderTransport:
@@ -183,7 +218,7 @@ class ProviderEvidenceClient:
 class ProviderConnections:
     evidence: ProviderEvidenceClient
     dissent: DissentMCPClient
-    execution: ExecutionMCPClient
+    execution: ContextBoundExecutionMCPClient
     execution_context: ExecutionProviderContext
 
 
@@ -242,8 +277,11 @@ class ProviderOnboarder:
         return ProviderConnections(
             evidence=evidence_client,
             dissent=DissentMCPClient(transport=dissent_transport, namespace=namespace),
-            execution=ExecutionMCPClient(
-                transport=execution_transport, policy=DEFAULT_EXECUTION_POLICY
+            execution=ContextBoundExecutionMCPClient(
+                client=ExecutionMCPClient(
+                    transport=execution_transport, policy=DEFAULT_EXECUTION_POLICY
+                ),
+                execution_context=execution_context,
             ),
             execution_context=execution_context,
         )

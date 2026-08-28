@@ -323,6 +323,7 @@ class GuardedExecutionService:
         *,
         context: OperatorContext | None = None,
         approval_receipt_id: str | None = None,
+        write_mcp: MCPPort | None = None,
     ) -> GuardedExecutionOutcome:
         if (context is None) != (approval_receipt_id is None):
             raise ValueError("context and approval receipt must be provided together")
@@ -441,6 +442,16 @@ class GuardedExecutionService:
                     selected_plan_hash=selected_plan_hash(plan),
                     policy_version=request.approval_policy_version,
                     actual_totals=approved_totals(plan),
+                )
+                if write_mcp is None:
+                    raise ValueError("approval-bound execution provider connection is required")
+
+            if write_mcp is not None:
+                _ensure_execution_connection_binding(
+                    write_mcp,
+                    execution_id=request.execution_id,
+                    approval_receipt_id=approval_receipt_id,
+                    selected_hash=selected_plan_hash(plan),
                 )
 
             await _lock_execution_capacity(
@@ -568,7 +579,7 @@ class GuardedExecutionService:
                     )
                     session.add(write)
                     await session.flush()
-                    result = await self._mcp.invoke(
+                    result = await (write_mcp or self._mcp).invoke(
                         MCPToolCall(
                             call_id=self._ids.new_id("mcp"),
                             server_name=self._server_name,
@@ -813,6 +824,24 @@ def _record_event(
             detail=detail,
         )
     )
+
+
+def _ensure_execution_connection_binding(
+    mcp: MCPPort,
+    *,
+    execution_id: str,
+    approval_receipt_id: str | None,
+    selected_hash: str,
+) -> None:
+    binding = getattr(mcp, "execution_context", None)
+    if binding is None:
+        raise ValueError("execution provider connection is not approval-bound")
+    if (
+        getattr(binding, "execution_id", None) != execution_id
+        or getattr(binding, "approval_receipt_id", None) != approval_receipt_id
+        or getattr(binding, "approved_plan_hash", None) != selected_hash
+    ):
+        raise ValueError("execution provider connection binding does not match approved action")
 
 
 async def _lock_execution_capacity(
