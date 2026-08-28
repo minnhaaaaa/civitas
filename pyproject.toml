@@ -17,6 +17,9 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.scripts]
+civitas-worker = "civitas.worker.cli:main"
+
 [dependency-groups]
 dev = [
   "hypothesis>=6.135,<7",

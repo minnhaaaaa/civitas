@@ -20,3 +20,6 @@ __all__ = [
     "LotBalance",
     "SQLAlchemyUnitOfWork",
 ]
+from civitas.persistence.workflow import PostgreSQLWorkflowCheckpointStore
+
+__all__ = ["PostgreSQLWorkflowCheckpointStore"]

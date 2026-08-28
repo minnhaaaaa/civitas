@@ -42,6 +42,11 @@ class DurableWorkflowWorker:
     async def enqueue(self, checkpoint: WorkflowCheckpoint) -> None:
         await self._store.enqueue(checkpoint)
 
+    async def recover_abandoned(self) -> int:
+        """Make expired leases eligible before the next polling cycle."""
+
+        return await self._store.recover_abandoned(now=self._clock.now())
+
     async def process_next(self) -> bool:
         now = self._clock.now()
         lease = await self._store.claim(
