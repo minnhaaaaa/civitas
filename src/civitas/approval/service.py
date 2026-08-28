@@ -143,6 +143,7 @@ class ApprovalService:
         context: OperatorContext,
         receipt_id: str,
         idempotency_key: str,
+        run_id: str | None = None,
         selected_plan_hash: str,
         policy_version: str,
         actual_totals: ApprovedTotals,
@@ -154,31 +155,58 @@ class ApprovalService:
         """
         now = self._clock.now()
         async with self._sessions() as session, session.begin():
-            receipt = await ApprovalRepository(session).receipt_for_operator_for_update(
+            return await self.consume_for_execution_in_session(
+                session,
+                context=context,
                 receipt_id=receipt_id,
-                organization_id=context.organization_id,
-                operator_id=context.operator_id,
+                idempotency_key=idempotency_key,
+                run_id=run_id,
+                selected_plan_hash=selected_plan_hash,
+                policy_version=policy_version,
+                actual_totals=actual_totals,
+                now=now,
             )
-            if receipt is None:
-                raise InvalidApprovalError("approval receipt was not found for this operator")
-            if receipt.expires_at <= now:
-                raise ExpiredApprovalError("approval receipt has expired")
-            if (
-                receipt.selected_plan_hash != selected_plan_hash
-                or receipt.policy_version != policy_version
-            ):
-                raise ChangedPlanError(
-                    "approval receipt is not bound to the current plan and policy"
-                )
-            approved = ApprovedTotals.model_validate(receipt.approved_totals)
-            if not _within_limits(actual_totals, approved):
-                raise InvalidApprovalError("execution totals exceed approved limits")
-            if receipt.consumed_idempotency_key not in (None, idempotency_key):
-                raise ReplayApprovalError("approval receipt was already consumed by another action")
-            if receipt.consumed_idempotency_key is None:
-                receipt.consumed_idempotency_key = idempotency_key
-                receipt.consumed_at = now
-            return _receipt_contract(receipt)
+
+    async def consume_for_execution_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        context: OperatorContext,
+        receipt_id: str,
+        idempotency_key: str,
+        run_id: str | None = None,
+        selected_plan_hash: str,
+        policy_version: str,
+        actual_totals: ApprovedTotals,
+        now: datetime | None = None,
+    ) -> ApprovalReceipt:
+        """Bind a receipt inside the caller's reservation/execution transaction."""
+        effective_now = now or self._clock.now()
+        receipt = await ApprovalRepository(session).receipt_for_operator_for_update(
+            receipt_id=receipt_id,
+            organization_id=context.organization_id,
+            operator_id=context.operator_id,
+        )
+        if receipt is None:
+            raise InvalidApprovalError("approval receipt was not found for this operator")
+        if receipt.expires_at <= effective_now:
+            raise ExpiredApprovalError("approval receipt has expired")
+        if run_id is not None and receipt.planning_run_id != run_id:
+            raise ChangedPlanError("approval receipt is not bound to the planning run")
+        if (
+            receipt.selected_plan_hash != selected_plan_hash
+            or receipt.policy_version != policy_version
+        ):
+            raise ChangedPlanError("approval receipt is not bound to the current plan and policy")
+        approved = ApprovedTotals.model_validate(receipt.approved_totals)
+        if not _within_limits(actual_totals, approved):
+            raise InvalidApprovalError("execution totals exceed approved limits")
+        if receipt.consumed_idempotency_key not in (None, idempotency_key):
+            raise ReplayApprovalError("approval receipt was already consumed by another action")
+        if receipt.consumed_idempotency_key is None:
+            receipt.consumed_idempotency_key = idempotency_key
+            receipt.consumed_at = effective_now
+        return _receipt_contract(receipt)
 
     async def invalidate_plan(
         self, *, organization_id: str, run_id: str, selected_plan_hash: str

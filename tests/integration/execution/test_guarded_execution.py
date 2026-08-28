@@ -6,24 +6,32 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from tools.mock_mcp import MockProcurementMCPServer
 
+from civitas.application.plan_identity import approved_totals, selected_plan_hash
+from civitas.approval.service import ApprovalService, ChangedPlanError
 from civitas.contracts.claims import ClaimScope, TypedClaim
-from civitas.contracts.enums import EvidenceOrigin, FeasibilityStatus
+from civitas.contracts.enums import EvidenceOrigin, ExecutionState, FeasibilityStatus
 from civitas.contracts.evidence import EvidenceIdentity, EvidenceRecord
 from civitas.contracts.execution import ExecutionRequest
-from civitas.execution.guarded import GuardedExecutionService, RefreshBundle
+from civitas.contracts.mcp_product import ApprovedTotals
+from civitas.execution.guarded import GuardedExecutionService, RefreshBundle, _load_plan
 from civitas.persistence.database import Database
 from civitas.persistence.models import (
     CandidatePlanModel,
+    ExecutionAuditEventModel,
+    ExecutionAuditModel,
     JuryDecisionModel,
     OrganizationModel,
     PlanningRunModel,
     ProcurementLineModel,
+    ProviderWriteModel,
     SKUModel,
     SupplierModel,
     WarehouseModel,
 )
+from civitas.ports.identity import OperatorContext
 
 
 class FakeClock:
@@ -37,10 +45,11 @@ class FakeClock:
 class FakeIDs:
     def __init__(self) -> None:
         self._value = 0
+        self._instance = uuid4().hex[:8]
 
     def new_id(self, namespace: str) -> str:
         self._value += 1
-        return f"{namespace}-{self._value}"
+        return f"{namespace}-{self._instance}-{self._value}"
 
 
 class StaticRefresher:
@@ -568,3 +577,175 @@ async def test_idempotency_key_cannot_be_reused_for_different_action(database: D
 
     with pytest.raises(ValueError, match="different execution request"):
         await service.execute(original.model_copy(update={"action": {"source": "tampered"}}))
+
+
+def operator_context(organization_id: str) -> OperatorContext:
+    return OperatorContext(
+        organization_id=organization_id,
+        operator_id="operator-approver",
+        authentication_subject="oidc:test-approver",
+        authenticated_at=datetime(2026, 8, 27, 11, 0, tzinfo=UTC),
+        roles=("procurement-approver",),
+    )
+
+
+async def approved_receipt_for(
+    database: Database,
+    *,
+    state: tuple[str, str, str, str, str, str, str],
+    now: datetime,
+) -> tuple[ApprovalService, OperatorContext, str]:
+    async with database.sessions() as session:
+        plan = await _load_plan(session, state[1])
+    assert plan is not None
+    context = operator_context(state[3])
+    approvals = ApprovalService(
+        sessions=database.sessions,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        secret_pepper=b"integration-test-pepper",
+    )
+    challenge = await approvals.issue(
+        context=context,
+        run_id=state[0],
+        selected_plan_hash=selected_plan_hash(plan),
+        policy_version="approval-v1",
+        approved_totals=approved_totals(plan),
+    )
+    receipt = await approvals.approve(
+        context=context,
+        challenge_id=challenge.challenge_id,
+        secret=challenge.challenge_secret,
+    )
+    return approvals, context, receipt.receipt_id
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_persisted_receipt_is_bound_to_execution_and_write_ledger(
+    database: Database,
+) -> None:
+    state = await seed_execution_state(database)
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    approvals, context, receipt_id = await approved_receipt_for(database, state=state, now=now)
+    offer_key = f"{state[6]}:{state[4]}:{state[5]}"
+    server = MockProcurementMCPServer()
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=server,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        approvals=approvals,
+        refresher=StaticRefresher(
+            RefreshBundle(
+                claims=(
+                    claim(
+                        claim_id="claim-approved-receipt",
+                        predicate="unit_price",
+                        observed_at=now,
+                        organization_id=state[3],
+                        sku_id=state[4],
+                        warehouse_id=state[5],
+                    ),
+                ),
+                evidence=(
+                    evidence(
+                        evidence_id="e-approved-receipt",
+                        claim_id="claim-approved-receipt",
+                        observed_at=now,
+                    ),
+                ),
+                observed_unit_prices={offer_key: Decimal("5")},
+                constraints={f"offer:{offer_key}:available": Decimal("10")},
+            )
+        ),
+    )
+    request = execution_request(
+        planning_run_id=state[0], plan_id=state[1], jury_id=state[2], key=identifier("idem")
+    )
+
+    outcome = await service.execute(
+        request,
+        context=context,
+        approval_receipt_id=receipt_id,
+    )
+
+    assert outcome.result.state is ExecutionState.SUCCEEDED
+    async with database.sessions() as session:
+        audit = await session.get(ExecutionAuditModel, request.execution_id)
+        assert audit is not None
+        assert audit.approval_receipt_id == receipt_id
+        events = (
+            await session.scalars(
+                select(ExecutionAuditEventModel)
+                .where(ExecutionAuditEventModel.execution_id == request.execution_id)
+                .order_by(ExecutionAuditEventModel.sequence)
+            )
+        ).all()
+        writes = (
+            await session.scalars(
+                select(ProviderWriteModel).where(
+                    ProviderWriteModel.execution_id == request.execution_id
+                )
+            )
+        ).all()
+    assert [event.state for event in events] == ["pending", "succeeded"]
+    assert len(writes) == 1
+    assert writes[0].state == "succeeded"
+    assert writes[0].external_reference
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_receipt_for_different_selected_plan_fails_before_provider_write(
+    database: Database,
+) -> None:
+    state = await seed_execution_state(database)
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    context = operator_context(state[3])
+    approvals = ApprovalService(
+        sessions=database.sessions,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        secret_pepper=b"integration-test-pepper",
+    )
+    challenge = await approvals.issue(
+        context=context,
+        run_id=state[0],
+        selected_plan_hash="0" * 64,
+        policy_version="approval-v1",
+        approved_totals=ApprovedTotals(
+            currency="USD",
+            maximum_landed_cost=Decimal("100"),
+            maximum_procurement_lines=10,
+            maximum_distribution_lines=10,
+        ),
+    )
+    receipt = await approvals.approve(
+        context=context,
+        challenge_id=challenge.challenge_id,
+        secret=challenge.challenge_secret,
+    )
+    server = MockProcurementMCPServer()
+    service = GuardedExecutionService(
+        sessions=database.sessions,
+        mcp=server,
+        ids=FakeIDs(),
+        clock=FakeClock(now),
+        approvals=approvals,
+        refresher=StaticRefresher(
+            RefreshBundle(claims=(), evidence=(), observed_unit_prices={}, constraints={})
+        ),
+    )
+
+    with pytest.raises(ChangedPlanError):
+        await service.execute(
+            execution_request(
+                planning_run_id=state[0],
+                plan_id=state[1],
+                jury_id=state[2],
+                key=identifier("idem"),
+            ),
+            context=context,
+            approval_receipt_id=receipt.receipt_id,
+        )
+
+    assert server._write_results == {}
