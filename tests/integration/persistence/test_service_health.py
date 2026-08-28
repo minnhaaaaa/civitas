@@ -6,6 +6,7 @@ from sqlalchemy import delete
 
 from civitas.persistence.health import PostgreSQLServiceHealthStore
 from civitas.persistence.models import ServiceHeartbeatModel
+from civitas.runtime.health import EXPECTED_DATABASE_REVISION
 
 
 @pytest.mark.asyncio
@@ -45,4 +46,4 @@ async def test_worker_heartbeat_is_durable_and_expires(database: object) -> None
 async def test_health_store_reads_applied_migration_revision(database: object) -> None:
     store = PostgreSQLServiceHealthStore(database.sessions)  # type: ignore[attr-defined]
     assert await store.database_alive()
-    assert await store.database_revision() == "c72e4a8b901d"
+    assert await store.database_revision() == EXPECTED_DATABASE_REVISION

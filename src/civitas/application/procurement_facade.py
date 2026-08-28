@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -116,6 +115,16 @@ class ApprovedExecutionPort(Protocol):
     ) -> tuple[ExecutionReceipt, tuple[ExecutionAuditEntry, ...]]: ...
 
 
+class AuditLinkIssuer(Protocol):
+    async def issue(
+        self,
+        organization_id: str,
+        run_id: str,
+        selected_plan_id: str,
+        maximum_event_sequence: int,
+    ) -> str | None: ...
+
+
 class ProcurementApplicationFacade:
     """Intent-level facade.  It is the only product-service implementation."""
 
@@ -127,7 +136,7 @@ class ProcurementApplicationFacade:
         executions: ApprovedExecutionPort,
         ids: IDGenerator,
         clock: Clock,
-        audit_link_for: Callable[[str, int], str | None] | None = None,
+        audit_links: AuditLinkIssuer | None = None,
         policy_version: str = "decision-integrity-v1",
     ) -> None:
         self._workflow_runs = workflow_runs
@@ -135,7 +144,7 @@ class ProcurementApplicationFacade:
         self._executions = executions
         self._ids = ids
         self._clock = clock
-        self._audit_link_for = audit_link_for
+        self._audit_links = audit_links
         self._policy_version = policy_version
 
     async def plan_procurement_goal(
@@ -161,9 +170,17 @@ class ProcurementApplicationFacade:
     async def get_decision_summary(
         self, context: OperatorContext, request: GetDecisionSummaryRequest
     ) -> DecisionSummary:
-        return _decision_summary(
-            await self._require_run(context, request.run_id), self._audit_link_for
+        snapshot = await self._require_run(context, request.run_id)
+        summary = _decision_summary(snapshot)
+        if self._audit_links is None or summary.selected_plan_id is None:
+            return summary
+        link = await self._audit_links.issue(
+            snapshot.organization_id,
+            snapshot.run_id,
+            summary.selected_plan_id,
+            snapshot.checkpoint.event_sequence,
         )
+        return summary.model_copy(update={"audit_link": link})
 
     async def prepare_execution(
         self, context: OperatorContext, request: PrepareExecutionRequest
@@ -274,9 +291,7 @@ def _run_response(
     )
 
 
-def _decision_summary(
-    snapshot: WorkflowRunSnapshot, link_for: Callable[[str, int], str | None] | None
-) -> DecisionSummary:
+def _decision_summary(snapshot: WorkflowRunSnapshot) -> DecisionSummary:
     checkpoint = snapshot.checkpoint
     plan = _selected_plan(checkpoint)
     jury = checkpoint.jury_evaluation
@@ -301,7 +316,6 @@ def _decision_summary(
             else None
         ),
         material_uncertainties=checkpoint.investigation_backlog,
-        audit_link=link_for(snapshot.run_id, checkpoint.event_sequence) if link_for else None,
     )
 
 

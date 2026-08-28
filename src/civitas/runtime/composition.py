@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+from civitas.api.audit_viewer import audit_viewer_routes
+from civitas.application.audit_viewer import PostgreSQLAuditViewerService
 from civitas.application.investigation import (
     DurableCleanRoomJury,
     EvidenceReader,
@@ -114,6 +116,7 @@ class RuntimeApplication:
     rate_limiter: RateLimiter
     authentication_audit: AuthenticationAuditSink
     mcp_server: InboundMCPServer
+    audit_viewer: PostgreSQLAuditViewerService | None
     health: RuntimeHealth
     metrics: MetricsRegistry
     _closed: bool = False
@@ -127,6 +130,13 @@ class RuntimeApplication:
             rate_limiter=self.rate_limiter,
             audit_sink=self.authentication_audit,
         )
+        if self.audit_viewer is not None:
+            app.routes.extend(
+                audit_viewer_routes(
+                    service=self.audit_viewer,
+                    rate_limiter=self.rate_limiter,
+                )
+            )
         install_operational_surface(
             app,
             health=self.health,
@@ -219,6 +229,18 @@ def build_runtime(
         clock=clock,
         secret_pepper=settings.approval_secret_pepper.encode("utf-8"),
     )
+    audit_viewer = None
+    if settings.audit_viewer_enabled:
+        assert settings.audit_link_secret is not None
+        assert settings.audit_viewer_base_url is not None
+        audit_viewer = PostgreSQLAuditViewerService(
+            sessions=database.sessions,
+            ids=ids,
+            clock=clock,
+            secret=settings.audit_link_secret.encode("utf-8"),
+            viewer_base_url=settings.audit_viewer_base_url,
+            ttl=timedelta(seconds=settings.audit_link_ttl_seconds),
+        )
     execution_port: ApprovedExecutionPort
     if executions is not None:
         execution_port = executions
@@ -246,6 +268,7 @@ def build_runtime(
         executions=execution_port,
         ids=ids,
         clock=clock,
+        audit_links=audit_viewer,
         policy_version=settings.policy_version,
     )
     operator_context = derive_operator_context(
@@ -299,6 +322,7 @@ def build_runtime(
         rate_limiter=effective_rate_limiter,
         authentication_audit=effective_audit,
         mcp_server=server,
+        audit_viewer=audit_viewer,
         health=health,
         metrics=MetricsRegistry(),
     )

@@ -58,6 +58,7 @@ _request_identity: ContextVar[OperatorContext | None] = ContextVar(
 )
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _OPERATIONAL_PATHS = frozenset({"/health/live", "/health/ready", "/metrics"})
+_SIGNED_AUDIT_PREFIX = "/api/audit/"
 
 
 class StaticIdentityProvider:
@@ -90,7 +91,10 @@ class BearerIdentityMiddleware(BaseHTTPMiddleware):
         self._audit_sink = audit_sink or NullAuthenticationAuditSink()
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
-        if request.method == "GET" and request.url.path in _OPERATIONAL_PATHS:
+        if request.method == "GET" and (
+            request.url.path in _OPERATIONAL_PATHS
+            or request.url.path.startswith(_SIGNED_AUDIT_PREFIX)
+        ):
             return cast(Response, await call_next(request))
         correlation_id = request.headers.get("x-correlation-id") or secrets.token_urlsafe(18)
         if _CORRELATION_ID.fullmatch(correlation_id) is None:

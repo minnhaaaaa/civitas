@@ -157,7 +157,32 @@ provider references from the execution audit before replaying any failed action.
 
 ## Optional audit viewer
 
-The viewer can be deployed behind the same identity-aware reverse proxy, but it
-is optional. It receives read-only, organization-scoped audit links; disabling
-or losing the viewer cannot block MCP planning or guarded execution. There is no
-viewer endpoint for approval or execution.
+The viewer is an optional static React deployment. Civitas issues a short-lived,
+opaque capability only after resolving the selected plan inside the requesting
+organization. PostgreSQL stores only the reference hash and immutable scope;
+the browser receives bounded, paginated projections with raw provider payloads,
+credentials, approval challenges, and correlation metadata removed. Cursors are
+signed and bound to both the link and resource.
+
+For local deployment, set a separate 32-byte secret and the browser-visible URL,
+then enable both profiles:
+
+```bash
+CIVITAS_AUDIT_VIEWER_ENABLED=true \
+CIVITAS_AUDIT_VIEWER_BASE_URL=http://localhost:8080 \
+CIVITAS_AUDIT_LINK_SECRET='replace-with-a-separate-random-32-byte-secret' \
+docker compose -f deploy/compose.local.yaml --profile mcp --profile audit-viewer up --build
+```
+
+Production requires HTTPS. Terminate TLS before the viewer, prevent referrers,
+avoid access-log query strings, and never forward audit URLs to analytics or
+third-party resources. The included nginx image proxies only `/api/audit/*`
+GETs to the MCP process; all approval and execution tools remain on the bearer-
+authenticated MCP boundary. Revoke a shared link by setting its `revoked_at`
+value through an organization-controlled administrative process, or allow its
+short TTL to expire. Do not put this capability in logs or tickets.
+
+The Kubernetes viewer manifest is intentionally an opt-in example outside the
+base Kustomization. Apply it only with a hostname-specific TLS route and a
+NetworkPolicy permitting viewer-to-MCP traffic. Disabling or losing the viewer
+cannot block MCP planning, approval, or guarded execution.

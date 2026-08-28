@@ -551,6 +551,32 @@ class ServiceHeartbeatModel(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
 
+class AuditLinkModel(Base):
+    """Immutable, expiring capability for one organization-scoped audit snapshot."""
+
+    __tablename__ = "audit_links"
+    __table_args__ = (
+        CheckConstraint("expires_at > issued_at", name="ck_audit_links_expiry"),
+        CheckConstraint("maximum_event_sequence >= 0", name="ck_audit_links_cursor"),
+        Index("ix_audit_links_org_run", "organization_id", "planning_run_id"),
+    )
+    id: Mapped[str] = mapped_column(ID, primary_key=True)
+    reference_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False
+    )
+    planning_run_id: Mapped[str] = mapped_column(
+        ForeignKey("planning_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    selected_plan_id: Mapped[str] = mapped_column(
+        ForeignKey("candidate_plans.id", ondelete="RESTRICT"), nullable=False
+    )
+    maximum_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ExecutionAuditModel(TimestampMixin, Base):
     __tablename__ = "execution_audits"
     __table_args__ = (

@@ -1,0 +1,83 @@
+# Optional example. Set CIVITAS_AUDIT_VIEWER_ENABLED=true and
+# CIVITAS_AUDIT_VIEWER_BASE_URL=https://audit.example.com on civitas-runtime,
+# then route that hostname to this Service. The nginx side proxies only the
+# signed GET resources to civitas-mcp; it exposes no approval or execution API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: civitas-audit-viewer
+  namespace: civitas
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: civitas-audit-viewer}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: civitas-audit-viewer
+        app.kubernetes.io/component: audit-viewer
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: viewer
+          image: civitas-audit-viewer:0.1.0
+          env:
+            - name: CIVITAS_AUDIT_API_UPSTREAM
+              value: http://civitas-mcp:8001
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: cache, mountPath: /var/cache/nginx}
+            - {name: run, mountPath: /var/run}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: cache, emptyDir: {sizeLimit: 16Mi}}
+        - {name: run, emptyDir: {sizeLimit: 4Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: civitas-audit-viewer
+  namespace: civitas
+spec:
+  selector: {app.kubernetes.io/name: civitas-audit-viewer}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: civitas-audit-viewer
+  namespace: civitas
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: civitas-audit-viewer}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    - ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: civitas-mcp}
+      ports:
+        - {protocol: TCP, port: 8001}

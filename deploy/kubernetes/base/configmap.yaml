@@ -13,5 +13,8 @@ data:
   CIVITAS_WORKER_READINESS_SECONDS: "120"
   CIVITAS_HEARTBEAT_INTERVAL_SECONDS: "10"
   CIVITAS_METRICS_ENABLED: "true"
+  # Enable only with the optional viewer overlay and a public HTTPS base URL.
+  CIVITAS_AUDIT_VIEWER_ENABLED: "false"
+  CIVITAS_AUDIT_LINK_TTL_SECONDS: "900"
   # The deployed image must contain this organization-owned provider bootstrap.
   CIVITAS_PROVIDER_FACTORY: provider_runtime.bootstrap:create_dependencies
