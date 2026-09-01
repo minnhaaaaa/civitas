@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import AnyHttpUrl, Field, model_validator
 
-from civitas.contracts.common import Contract
+from civitas.contracts.common import Contract, JsonObject
 from civitas.contracts.providers import ProviderAccessContext
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
@@ -101,6 +101,41 @@ class CapabilityBinding(Contract):
     tool_name: str = Field(min_length=1, max_length=128)
     mapping_file: str | None = Field(default=None, min_length=1, max_length=1_024)
     enabled: bool = True
+
+
+class RequestMapping(Contract):
+    fields: dict[str, str] = Field(default_factory=dict, max_length=100)
+    constants: JsonObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_pointers(self) -> RequestMapping:
+        if any(not pointer.startswith("/") for pointer in self.fields.values()):
+            raise ValueError("request field mappings must use absolute JSON Pointers")
+        if set(self.fields) & set(self.constants):
+            raise ValueError("request fields and constants cannot target the same argument")
+        return self
+
+
+class CollectionMapping(Contract):
+    source_pointer: str = Field(min_length=1, max_length=1_024)
+    target_field: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
+    fields: dict[str, str] = Field(min_length=1, max_length=100)
+    constants: JsonObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_pointers(self) -> CollectionMapping:
+        pointers = (self.source_pointer, *self.fields.values())
+        if any(not pointer.startswith("/") for pointer in pointers):
+            raise ValueError("collection mappings must use absolute JSON Pointers")
+        if set(self.fields) & set(self.constants):
+            raise ValueError("collection fields and constants cannot target the same field")
+        return self
+
+
+class CapabilityMapping(Contract):
+    mapping_version: Literal["1"] = "1"
+    request: RequestMapping = Field(default_factory=RequestMapping)
+    response_collection: CollectionMapping | None = None
 
 
 class LocalProviderConfiguration(Contract):
