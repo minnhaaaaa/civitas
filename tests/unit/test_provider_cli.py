@@ -141,3 +141,36 @@ def test_cli_list_does_not_resolve_or_print_secret_values(
     output = capsys.readouterr().out
     assert "purchasing" in output
     assert "must-not-print" not in output
+
+
+def test_cli_does_not_echo_credentials_from_invalid_url(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        _run(
+            tmp_path / "providers.json",
+            "providers",
+            "add",
+            "purchasing",
+            "--name",
+            "Purchasing MCP",
+            "--transport",
+            "http",
+            "--url",
+            "https://example.com/mcp?token=must-not-print",
+        )
+
+    assert "must-not-print" not in capsys.readouterr().err
+
+
+def test_cli_uses_runtime_provider_config_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "shared" / "providers.json"
+    monkeypatch.setenv("CIVITAS_PROVIDER_CONFIG", str(config_path))
+
+    assert main(["providers", "use-sandbox"]) == 0
+
+    assert LocalProviderConfigStore(config_path).load().mode is ProviderMode.SANDBOX

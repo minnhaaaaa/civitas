@@ -215,6 +215,9 @@ def _print_configuration(configuration: LocalProviderConfiguration) -> None:
 
 
 def _default_config_path() -> Path:
+    provider_config = os.environ.get("CIVITAS_PROVIDER_CONFIG")
+    if provider_config:
+        return Path(provider_config)
     explicit = os.environ.get("CIVITAS_CONFIG_HOME")
     if explicit:
         return Path(explicit) / "providers.json"
