@@ -111,8 +111,6 @@ class LocalProviderConfiguration(Contract):
 
     @model_validator(mode="after")
     def validate_provider_graph(self) -> LocalProviderConfiguration:
-        if self.mode is ProviderMode.SANDBOX and (self.providers or self.bindings):
-            raise ValueError("sandbox configuration cannot include real providers or bindings")
         provider_ids = [provider.provider_id for provider in self.providers]
         if len(provider_ids) != len(set(provider_ids)):
             raise ValueError("provider identifiers must be unique")

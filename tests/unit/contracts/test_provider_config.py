@@ -88,6 +88,21 @@ def test_sandbox_configuration_requires_no_real_providers() -> None:
     assert configuration.config_version == "1"
 
 
+def test_sandbox_mode_preserves_disabled_live_provider_configuration() -> None:
+    provider = ProviderDefinition(
+        provider_id="warehouse",
+        display_name="Warehouse MCP",
+        transport=StdioMCPTransport(command="uvx", args=("warehouse-mcp",)),
+    )
+
+    configuration = LocalProviderConfiguration(
+        mode=ProviderMode.SANDBOX,
+        providers=(provider,),
+    )
+
+    assert configuration.providers == (provider,)
+
+
 def test_configuration_file_path_is_not_part_of_the_contract(tmp_path: Path) -> None:
     configuration = LocalProviderConfiguration(mode=ProviderMode.SANDBOX)
 

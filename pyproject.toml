@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
+civitas = "civitas.cli:main"
 civitas-mcp = "civitas.runtime.main:main"
 civitas-worker = "civitas.worker.cli:main"
 civitas-demo-seed = "civitas.runtime.demo_seed:main"
