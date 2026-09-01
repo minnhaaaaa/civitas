@@ -6,7 +6,15 @@ import os
 import tempfile
 from pathlib import Path
 
-from civitas.contracts.provider_config import LocalProviderConfiguration
+from pydantic import ValidationError
+
+from civitas.contracts.provider_config import (
+    CapabilityMapping,
+    LocalProviderConfiguration,
+)
+from civitas.integrations.mcp import MCPAccessError
+
+_MAX_MAPPING_BYTES = 256 * 1024
 
 
 class LocalProviderConfigStore:
@@ -47,3 +55,34 @@ class LocalProviderConfigStore:
         finally:
             if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink()
+
+
+def load_mappings(
+    store: LocalProviderConfigStore,
+    configuration: LocalProviderConfiguration,
+) -> dict[str, CapabilityMapping]:
+    """Load unique, versioned mappings without escaping the config directory."""
+
+    base_directory = store.path.parent.resolve()
+    mappings: dict[str, CapabilityMapping] = {}
+    references = {
+        binding.mapping_file
+        for binding in configuration.bindings
+        if binding.mapping_file is not None
+    }
+    for reference in sorted(references):
+        mapping_path = (base_directory / reference).resolve()
+        if not mapping_path.is_relative_to(base_directory):
+            raise MCPAccessError("mapping files must stay inside the configuration directory")
+        try:
+            if not mapping_path.is_file():
+                raise MCPAccessError("configured mapping file is unavailable")
+            if mapping_path.stat().st_size > _MAX_MAPPING_BYTES:
+                raise MCPAccessError("configured mapping file exceeds the size limit")
+            payload = mapping_path.read_text(encoding="utf-8")
+            mappings[reference] = CapabilityMapping.model_validate_json(payload)
+        except MCPAccessError:
+            raise
+        except (OSError, UnicodeError, ValidationError) as error:
+            raise MCPAccessError("configured mapping file is invalid") from error
+    return mappings

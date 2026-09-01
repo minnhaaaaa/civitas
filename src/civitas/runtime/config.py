@@ -36,6 +36,7 @@ class RuntimeSettings:
     log_format: str = "console"
     service_name: str = "civitas-mcp"
     provider_factory: str | None = None
+    provider_config_path: Path | None = None
     live_provider_required: bool = False
     require_worker_ready: bool = False
     worker_readiness_seconds: int = 120
@@ -83,9 +84,14 @@ class RuntimeSettings:
             raise SettingsError("CIVITAS_WORKER_READINESS_SECONDS must be between 15 and 3600")
         if not 2 <= self.heartbeat_interval_seconds < self.worker_readiness_seconds:
             raise SettingsError("heartbeat interval must be shorter than worker readiness TTL")
-        if self.live_provider_required and not self.provider_factory:
+        if self.provider_factory is not None and self.provider_config_path is not None:
+            raise SettingsError("configure only one provider bootstrap")
+        if self.live_provider_required and not (
+            self.provider_factory or self.provider_config_path
+        ):
             raise SettingsError(
-                "CIVITAS_PROVIDER_FACTORY is required when live provider mode is required"
+                "CIVITAS_PROVIDER_FACTORY or CIVITAS_PROVIDER_CONFIG is required "
+                "when live provider mode is required"
             )
         if self.provider_factory is not None and ":" not in self.provider_factory:
             raise SettingsError("CIVITAS_PROVIDER_FACTORY must use module:callable syntax")
@@ -168,6 +174,11 @@ class RuntimeSettings:
             log_format=values.get("CIVITAS_LOG_FORMAT", "console"),
             service_name=values.get("CIVITAS_SERVICE_NAME", "civitas-mcp"),
             provider_factory=values.get("CIVITAS_PROVIDER_FACTORY") or None,
+            provider_config_path=(
+                Path(values["CIVITAS_PROVIDER_CONFIG"])
+                if values.get("CIVITAS_PROVIDER_CONFIG", "").strip()
+                else None
+            ),
             live_provider_required=_boolean(values, "CIVITAS_LIVE_PROVIDER_REQUIRED", False),
             require_worker_ready=_boolean(values, "CIVITAS_REQUIRE_WORKER_READY", False),
             worker_readiness_seconds=_integer(values, "CIVITAS_WORKER_READINESS_SECONDS", 120),
