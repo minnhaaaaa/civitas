@@ -162,6 +162,21 @@ the browser receives bounded, paginated projections with raw provider payloads,
 credentials, approval challenges, and correlation metadata removed. Cursors are
 signed and bound to both the link and resource.
 
+The Vite application also serves the public landing/install guide at `/` and
+routes signed records through `/audit/:reference`. Deploy the static build to
+Vercel from the repository root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @civitas/web build
+vercel --prod
+```
+
+The checked-in `vercel.json` builds the web workspace, rewrites audit deep links
+to the SPA, and adds baseline browser security headers. Do not connect the
+public deployment to the unauthenticated local demo API. A live audit API must
+remain behind the organization-scoped production boundary described below.
+
 For local deployment, set a separate 32-byte secret and the browser-visible URL,
 then enable both profiles:
 

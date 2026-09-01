@@ -195,9 +195,7 @@ class PersistedApprovedExecutionAdapter:
                     or duplicate.action != action
                     or duplicate.approval_receipt_id != receipt.id
                 ):
-                    raise ValueError(
-                        "idempotency key was reused for a different execution request"
-                    )
+                    raise ValueError("idempotency key was reused for a different execution request")
                 return _execution_receipt_from_audit(
                     duplicate, receipt.selected_plan_hash
                 ).model_copy(update={"duplicate": True})

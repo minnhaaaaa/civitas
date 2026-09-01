@@ -251,8 +251,10 @@ def _support_annotations(annotations: Mapping[str, object], plan_id: str) -> dic
     plan_support = annotations.get(plan_id)
     if plan_support is None:
         base_plan_id, separator, version = plan_id.rpartition("-")
-        if separator and len(version) == 12 and all(
-            character in "0123456789abcdef" for character in version
+        if (
+            separator
+            and len(version) == 12
+            and all(character in "0123456789abcdef" for character in version)
         ):
             plan_support = annotations.get(base_plan_id)
     if plan_support is None:

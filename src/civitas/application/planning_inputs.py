@@ -154,9 +154,7 @@ def _solver_constraints(
                     "bucket_id": record.get("bucket_id", first_bucket),
                     "maximum_base_units": record.get(
                         "maximum_base_units",
-                        record.get(
-                            "remaining_capacity_units", record.get("available_quantity", 0)
-                        ),
+                        record.get("remaining_capacity_units", record.get("available_quantity", 0)),
                     ),
                 }
                 for record in _records(payload, "records")

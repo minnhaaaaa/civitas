@@ -23,9 +23,12 @@ def test_stdio_configuration_is_portable_and_uses_the_inbound_server() -> None:
     configuration = json.loads((PLUGIN_ROOT / ".mcp.json").read_text())
     server = configuration["mcpServers"]["civitas"]
 
-    assert server["command"] == "uv"
-    assert server["args"] == ["run", "python", "-m", "civitas.mcp_server"]
-    assert server["env"] == {"CIVITAS_MCP_TRANSPORT": "stdio"}
+    assert server["command"] == "uvx"
+    assert server["args"] == [
+        "--from",
+        "git+https://github.com/minnhaaaaa/civitas",
+        "civitas-mcp-demo",
+    ]
     serialized = json.dumps(configuration)
     assert "/home/" not in serialized
     assert "secret" not in serialized.lower()

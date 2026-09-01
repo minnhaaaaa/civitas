@@ -29,9 +29,7 @@ def upgrade() -> None:
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
         ),
-        sa.CheckConstraint(
-            "service_kind IN ('mcp-server', 'worker')", name="ck_heartbeat_kind"
-        ),
+        sa.CheckConstraint("service_kind IN ('mcp-server', 'worker')", name="ck_heartbeat_kind"),
         sa.CheckConstraint(
             "state IN ('starting', 'running', 'stopping')", name="ck_heartbeat_state"
         ),

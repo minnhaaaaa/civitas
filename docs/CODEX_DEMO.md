@@ -5,6 +5,17 @@ for inventory, demand, supplier offers, lead times, warehouse capacity, and
 transport capacity, plus one idempotent purchase-order write. The simulator is
 refused when `CIVITAS_ENV=production`.
 
+## Install the zero-configuration sandbox
+
+For a side-effect-safe local product tour without PostgreSQL or Docker:
+
+```bash
+codex mcp add civitas -- uvx --from git+https://github.com/minnhaaaaa/civitas civitas-mcp-demo
+```
+
+The Git-backed `civitas-mcp-demo` entry point runs over STDIO and cannot contact
+a real supplier. Use the complete stack below to exercise the durable runtime.
+
 ## Start the complete stack
 
 ```bash

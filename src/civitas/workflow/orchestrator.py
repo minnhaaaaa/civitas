@@ -331,9 +331,7 @@ class ParliamentWorkflow:
             policy_version="decision-integrity-v1",
             autonomy_budget_exhausted=self._bounds_exhausted(checkpoint, limits),
             require_critical_external_support=bool(
-                checkpoint.optimization_request.constraints.get(
-                    "provider_evidence_required", False
-                )
+                checkpoint.optimization_request.constraints.get("provider_evidence_required", False)
             ),
         )
         evaluation = await self._jury.evaluate(request)

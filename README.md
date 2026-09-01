@@ -4,7 +4,7 @@ Civitas is an autonomous multi-agent food-procurement system that combines negot
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, a deployable MCP composition root, PostgreSQL-backed resumable workflow execution, provider onboarding boundaries, persisted approval and guarded execution, tenant-scoped identity, and a deterministic integration suite. Real provider credentials and transports remain deployment-supplied, and durable clean-room investigation is completed by the next workstream. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
+The React application is a public landing and installation guide with an optional, read-only evidence and execution-audit route; the MCP server remains the product's primary entry point. The repository includes strict inbound MCP contracts, a deployable MCP composition root, PostgreSQL-backed resumable workflow execution, provider onboarding boundaries, persisted approval and guarded execution, tenant-scoped identity, and a deterministic integration suite. Real provider credentials and transports remain deployment-supplied, and durable clean-room investigation is completed by the next workstream. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
 
 ## Product interface
 
@@ -25,6 +25,47 @@ Codex: Civitas found false consensus on a stale lead-time source and replanned.
        The revised plan has Integrity 92/100 and all hard gates pass.
        Approve the exact plan for execution?
 ```
+
+## Install the MCP sandbox
+
+The public installer runs a self-contained, side-effect-safe STDIO sandbox. It
+uses the real intent-level MCP surface, optimizer, Parliament/Jury workflow,
+approval binding, freshness checks, and duplicate-execution protection, but it
+cannot contact a supplier or create a live purchase order.
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then add
+Civitas to Codex:
+
+```bash
+codex mcp add civitas -- uvx --from git+https://github.com/minnhaaaaa/civitas civitas-mcp-demo
+```
+
+Or add it to Claude Code for the current user:
+
+```bash
+claude mcp add civitas --scope user -- uvx --from git+https://github.com/minnhaaaaa/civitas civitas-mcp-demo
+```
+
+Any STDIO-compatible MCP client can use this standard server definition:
+
+```json
+{
+  "mcpServers": {
+    "civitas": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/minnhaaaaa/civitas",
+        "civitas-mcp-demo"
+      ]
+    }
+  }
+}
+```
+
+The production entry point is `civitas-mcp`. It deliberately fails startup
+without PostgreSQL, authenticated organization/operator bindings, and strong
+approval credentials; see [the deployment guide](docs/DEPLOYMENT.md).
 
 ## Development
 

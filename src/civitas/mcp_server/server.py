@@ -44,12 +44,13 @@ from civitas.ports.product_service import ProductService
 
 MCP_SERVER_INSTRUCTIONS = """Civitas plans and executes procurement safely.
 
-Safe sequence: call plan_procurement_goal, poll get_planning_run, inspect
-get_decision_summary, then call prepare_execution. Present the returned immutable
-challenge to the operator. Only after explicit approval call approve_execution,
-then execute_approved_plan with its receipt and a new idempotency key. Never invent
-quantities, an approval, a receipt, or execution success. Investigate or escalate
-when Civitas reports that state instead of retrying around it.
+Start with plan_procurement_goal. If it returns connection_required, present its
+real and sandbox options, wait for the operator's choice, connect the chosen
+provider, and resume the same run. Inspect get_decision_summary and call
+prepare_execution. Present the immutable challenge and stop. Only after explicit
+approval call approve_execution. If purchasing is not connected, present its
+connection options and wait again. Execute with the receipt and one idempotency key.
+Never confuse sandbox and live providers or invent quantities, approval, or success.
 """
 
 IdentityProvider = Callable[[], Awaitable[OperatorContext]]
@@ -182,11 +183,12 @@ class InboundMCPServer:
         identity_provider: IdentityProvider,
         *,
         authorizer: RoleAuthorizer | None = None,
+        instructions: str = MCP_SERVER_INSTRUCTIONS,
     ) -> None:
         self._service = service
         self._identity_provider = identity_provider
         self._authorizer = authorizer
-        self._mcp = FastMCP(name="Civitas", instructions=MCP_SERVER_INSTRUCTIONS)
+        self._mcp = FastMCP(name="Civitas", instructions=instructions)
         for tool_name, request_type in TOOL_REQUEST_CONTRACTS.items():
             self._register_tool(tool_name, request_type)
 

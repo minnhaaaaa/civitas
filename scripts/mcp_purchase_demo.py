@@ -47,9 +47,7 @@ async def _run(args: argparse.Namespace) -> int:
         "horizon_ends_at": (horizon_start + timedelta(days=1)).isoformat(),
         "timezone": "UTC",
         "sku_ids": [os.environ.get("CIVITAS_SIMULATOR_SKU_ID", "sku-local")],
-        "warehouse_ids": [
-            os.environ.get("CIVITAS_SIMULATOR_WAREHOUSE_ID", "warehouse-local")
-        ],
+        "warehouse_ids": [os.environ.get("CIVITAS_SIMULATOR_WAREHOUSE_ID", "warehouse-local")],
         "maximum_cycles": 3,
         "model_call_budget": 12,
         "tool_call_budget": 30,
@@ -61,15 +59,11 @@ async def _run(args: argparse.Namespace) -> int:
         read, write, _ = streams
         async with ClientSession(read, write) as session:
             await session.initialize()
-            created = _payload(
-                await session.call_tool("plan_procurement_goal", {"goal": goal})
-            )
+            created = _payload(await session.call_tool("plan_procurement_goal", {"goal": goal}))
             run_id = created["run"]["run_id"]
             for _ in range(120):
                 current = _payload(
-                    await session.call_tool(
-                        "get_planning_run", {"run_id": run_id, "page_size": 50}
-                    )
+                    await session.call_tool("get_planning_run", {"run_id": run_id, "page_size": 50})
                 )
                 status = current["run"]["status"]
                 if status != "planning":
@@ -77,9 +71,7 @@ async def _run(args: argparse.Namespace) -> int:
                 await asyncio.sleep(0.25)
             else:
                 raise TimeoutError("planning worker did not finish")
-            summary = _payload(
-                await session.call_tool("get_decision_summary", {"run_id": run_id})
-            )
+            summary = _payload(await session.call_tool("get_decision_summary", {"run_id": run_id}))
             print(json.dumps({"planning": summary}, indent=2))
             if status != "ready_for_approval":
                 raise RuntimeError(f"planning did not reach approval: {status}")

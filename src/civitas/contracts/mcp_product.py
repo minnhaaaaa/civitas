@@ -20,6 +20,7 @@ from pydantic import Field, field_validator, model_validator
 
 from civitas.contracts.common import Contract, JsonObject
 from civitas.contracts.enums import ExecutionState, JuryState
+from civitas.contracts.optimization import DistributionLine, ProcurementLine
 
 MCP_PRODUCT_CONTRACT_VERSION: Literal["1"] = "1"
 APPROVAL_CONTRACT_VERSION: Literal["1"] = "1"
@@ -28,6 +29,12 @@ MAX_GOAL_HORIZON = timedelta(days=31)
 
 Identifier = str
 """Opaque, organization-scoped identifier with a conservative wire format."""
+
+
+class ProductContract(Contract):
+    """Base for every public request and response contract."""
+
+    contract_version: Literal["1"] = MCP_PRODUCT_CONTRACT_VERSION
 
 
 class ProductErrorCode(StrEnum):
@@ -43,6 +50,7 @@ class ProductErrorCode(StrEnum):
 
 
 class PlanningRunStatus(StrEnum):
+    CONNECTION_REQUIRED = "connection_required"
     QUEUED = "queued"
     PLANNING = "planning"
     INVESTIGATING = "investigating"
@@ -54,10 +62,101 @@ class PlanningRunStatus(StrEnum):
     FAILED = "failed"
 
 
-class ProductContract(Contract):
-    """Base for every public request and response contract."""
+class ProviderPurpose(StrEnum):
+    EVIDENCE = "evidence"
+    EXECUTION = "execution"
 
-    contract_version: Literal["1"] = MCP_PRODUCT_CONTRACT_VERSION
+
+class ProviderType(StrEnum):
+    CIVITAS_SANDBOX = "civitas_sandbox"
+    REMOTE_MCP = "remote_mcp"
+    ODOO = "odoo"
+
+
+class ProviderConnectionState(StrEnum):
+    DISCONNECTED = "disconnected"
+    AUTHORIZATION_REQUIRED = "authorization_required"
+    CONNECTED = "connected"
+
+
+class ConnectionOption(ProductContract):
+    provider_type: ProviderType
+    label: str = Field(min_length=1, max_length=100)
+    purpose: ProviderPurpose
+    live: bool
+
+
+class ConnectionRequirements(ProductContract):
+    status: Literal["connection_required"] = "connection_required"
+    missing_capabilities: tuple[str, ...] = Field(default=(), max_length=20)
+    options: tuple[ConnectionOption, ...] = Field(default=(), max_length=20)
+    message: str = Field(min_length=1, max_length=500)
+
+
+class ConnectionRecord(ProductContract):
+    connection_id: Identifier = Field(min_length=1, max_length=128)
+    provider_type: ProviderType
+    purpose: ProviderPurpose
+    state: ProviderConnectionState
+    display_name: str = Field(min_length=1, max_length=100)
+    live: bool
+    capabilities: tuple[str, ...] = Field(default=(), max_length=20)
+    write_enabled: bool = False
+
+
+class ListConnectionsRequest(ProductContract):
+    pass
+
+
+class ListConnectionsResponse(ProductContract):
+    connections: tuple[ConnectionRecord, ...] = Field(default=(), max_length=50)
+
+
+class EnableSandboxProviderRequest(ProductContract):
+    purpose: ProviderPurpose
+    acknowledge_simulation: bool
+
+
+class EnableSandboxProviderResponse(ProductContract):
+    connection: ConnectionRecord
+
+
+class BeginProviderConnectionRequest(ProductContract):
+    provider_type: ProviderType
+    purpose: ProviderPurpose
+
+    @model_validator(mode="after")
+    def reject_sandbox(self) -> BeginProviderConnectionRequest:
+        if self.provider_type is ProviderType.CIVITAS_SANDBOX:
+            raise ValueError("use enable_sandbox_provider for the sandbox")
+        return self
+
+
+class BeginProviderConnectionResponse(ProductContract):
+    connection: ConnectionRecord
+    authorization_url: str = Field(min_length=1, max_length=2_048)
+    expires_at: datetime
+
+
+class ResumePlanningRunRequest(ProductContract):
+    run_id: Identifier = Field(min_length=1, max_length=128)
+
+
+class UpdateSandboxOfferRequest(ProductContract):
+    supplier_id: Identifier = Field(min_length=1, max_length=128)
+    unit_cost: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=4)
+    lead_time_days: int | None = Field(default=None, ge=0, le=365)
+    expected_waste_rate: int | None = Field(default=None, ge=0, le=100)
+    risk: int | None = Field(default=None, ge=0, le=100)
+
+
+class UpdateSandboxOfferResponse(ProductContract):
+    supplier_id: Identifier
+    unit_cost: Decimal
+    lead_time_days: int
+    expected_waste_rate: int
+    risk: int
+    observation_version: str
 
 
 class ProductError(ProductContract):
@@ -175,6 +274,7 @@ class PlanningRunResponse(ProductContract):
     run: PlanningRun
     progress: tuple[PlanningProgress, ...] = Field(default=(), max_length=MAX_PAGE_SIZE)
     next_cursor: str | None = Field(default=None, min_length=4, max_length=512)
+    connection_requirements: ConnectionRequirements | None = None
 
 
 class GetPlanningRunRequest(PageRequest):
@@ -206,6 +306,8 @@ class DecisionSummary(ProductContract):
     selected_plan_id: Identifier | None = Field(default=None, min_length=1, max_length=128)
     selected_plan_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     business_impact: BusinessImpact | None = None
+    procurement_lines: tuple[ProcurementLine, ...] = Field(default=(), max_length=10_000)
+    distribution_lines: tuple[DistributionLine, ...] = Field(default=(), max_length=10_000)
     integrity: IntegritySummary | None = None
     material_uncertainties: tuple[str, ...] = Field(default=(), max_length=20)
     audit_link: str | None = Field(default=None, max_length=2_048)
@@ -274,6 +376,7 @@ class ApprovalReceipt(ProductContract):
 
 class ApproveExecutionResponse(ProductContract):
     receipt: ApprovalReceipt
+    connection_requirements: ConnectionRequirements | None = None
 
 
 class ExecuteApprovedPlanRequest(ProductContract):
@@ -324,6 +427,11 @@ class ExecutionAuditResponse(ProductContract):
 
 
 TOOL_REQUEST_CONTRACTS: dict[str, type[ProductContract]] = {
+    "list_connections": ListConnectionsRequest,
+    "begin_provider_connection": BeginProviderConnectionRequest,
+    "enable_sandbox_provider": EnableSandboxProviderRequest,
+    "update_sandbox_offer": UpdateSandboxOfferRequest,
+    "resume_planning_run": ResumePlanningRunRequest,
     "plan_procurement_goal": PlanProcurementGoalRequest,
     "get_planning_run": GetPlanningRunRequest,
     "get_decision_summary": GetDecisionSummaryRequest,
@@ -334,6 +442,11 @@ TOOL_REQUEST_CONTRACTS: dict[str, type[ProductContract]] = {
 }
 
 TOOL_RESPONSE_CONTRACTS: dict[str, type[ProductContract]] = {
+    "list_connections": ListConnectionsResponse,
+    "begin_provider_connection": BeginProviderConnectionResponse,
+    "enable_sandbox_provider": EnableSandboxProviderResponse,
+    "update_sandbox_offer": UpdateSandboxOfferResponse,
+    "resume_planning_run": PlanningRunResponse,
     "plan_procurement_goal": PlanningRunResponse,
     "get_planning_run": PlanningRunResponse,
     "get_decision_summary": DecisionSummary,

@@ -29,21 +29,13 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("expires_at > issued_at", name="ck_audit_links_expiry"),
         sa.CheckConstraint("maximum_event_sequence >= 0", name="ck_audit_links_cursor"),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["planning_run_id"], ["planning_runs.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["selected_plan_id"], ["candidate_plans.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["planning_run_id"], ["planning_runs.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["selected_plan_id"], ["candidate_plans.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("reference_hash"),
     )
-    op.create_index(
-        "ix_audit_links_org_run", "audit_links", ["organization_id", "planning_run_id"]
-    )
+    op.create_index("ix_audit_links_org_run", "audit_links", ["organization_id", "planning_run_id"])
 
 
 def downgrade() -> None:
