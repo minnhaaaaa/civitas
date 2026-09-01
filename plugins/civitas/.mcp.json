@@ -1,16 +1,12 @@
 {
   "mcpServers": {
     "civitas": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "run",
-        "python",
-        "-m",
-        "civitas.mcp_server"
-      ],
-      "env": {
-        "CIVITAS_MCP_TRANSPORT": "stdio"
-      }
+        "--from",
+        "git+https://github.com/minnhaaaaa/civitas",
+        "civitas-mcp-demo"
+      ]
     }
   }
 }

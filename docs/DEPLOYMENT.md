@@ -111,7 +111,19 @@ failed action.
 
 ## Optional audit viewer
 
-The viewer can be deployed behind the same identity-aware reverse proxy, but it
-is optional. It receives read-only, organization-scoped audit links; disabling
-or losing the viewer cannot block MCP planning or guarded execution. There is no
-viewer endpoint for approval or execution.
+The Vite application serves the public landing/install experience at `/` and the
+optional read-only viewer at `/audit/:reference`. It can be deployed to Vercel
+from the repository root; `vercel.json` builds the `@civitas/web` workspace and
+rewrites audit deep links to the SPA entry point.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @civitas/web build
+vercel --prod
+```
+
+Do not proxy the unauthenticated local demonstration API through the public
+Vercel site. A production audit API must sit behind the same identity-aware
+boundary as the organization-scoped MCP service. The viewer remains optional;
+disabling or losing it cannot block MCP planning or guarded execution, and it
+has no approval or execution endpoint.

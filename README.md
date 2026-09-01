@@ -4,7 +4,7 @@ Civitas is an autonomous multi-agent food-procurement system that combines negot
 
 Specialized Parliament agents investigate competing objectives and compare solver-generated procurement alternatives. An evidence-aware Jury then evaluates provenance, genuine source independence, contradictions, and adversarial dissent before an action can pass the execution safety boundary.
 
-The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, the transport-neutral procurement facade, a deterministic integration suite, and the viewer-based false-consensus demonstration. The deployment composition that connects those pieces to PostgreSQL, a durable worker, and real procurement providers remains environment-specific. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
+The React application is an optional, read-only evidence and execution-audit viewer rather than the product's primary entry point. The repository includes strict inbound MCP contracts, a validated MCP composition entry point, the transport-neutral procurement facade, a deterministic integration suite, and the viewer-based false-consensus demonstration. Durable workflow, provider, guarded-execution, and production identity adapters remain separate bounded workstreams. See [MCP_INTERFACE.md](MCP_INTERFACE.md), [MCP_AGENT_WORKPLAN.md](MCP_AGENT_WORKPLAN.md), [PLAN.md](PLAN.md), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md), and [SECURITY.md](SECURITY.md).
 
 ## Product interface
 
@@ -25,6 +25,47 @@ Codex: Civitas found false consensus on a stale lead-time source and replanned.
        The revised plan has Integrity 92/100 and all hard gates pass.
        Approve the exact plan for execution?
 ```
+
+## Install the MCP sandbox
+
+The public installer runs a self-contained, side-effect-safe STDIO sandbox. It
+uses the real intent-level MCP surface, optimizer, Parliament/Jury workflow,
+approval binding, freshness checks, and duplicate-execution protection, but it
+cannot contact a supplier or create a live purchase order.
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then add
+Civitas to Codex:
+
+```bash
+codex mcp add civitas -- uvx --from git+https://github.com/minnhaaaaa/civitas civitas-mcp-demo
+```
+
+Or add it to Claude Code for the current user:
+
+```bash
+claude mcp add civitas --scope user -- uvx --from git+https://github.com/minnhaaaaa/civitas civitas-mcp-demo
+```
+
+Any STDIO-compatible MCP client can use this standard server definition:
+
+```json
+{
+  "mcpServers": {
+    "civitas": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/minnhaaaaa/civitas",
+        "civitas-mcp-demo"
+      ]
+    }
+  }
+}
+```
+
+The production entry point is `civitas-mcp`. It deliberately fails startup
+without PostgreSQL, authenticated organization/operator bindings, and strong
+approval credentials; see [the deployment guide](docs/DEPLOYMENT.md).
 
 ## Development
 
@@ -79,7 +120,9 @@ Run the integration-focused checks with:
 uv run pytest tests/integration/test_demo_api.py tests/unit/execution/test_service.py tests/contract/test_mcp_integration.py -q
 ```
 
-For the offline viewer demonstration, open `http://127.0.0.1:5173`, choose `False consensus with clean-room dissent`, and start the run. The SSE stream is produced while the scenario executes. The event docket should show this sequence:
+For the public landing page and install walkthrough, open `http://127.0.0.1:5173`.
+Read-only decision records remain available through signed `/audit/:reference`
+deep links. The false-consensus scenario should show this sequence:
 
 ```text
 evidence retrieval

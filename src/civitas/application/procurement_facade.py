@@ -20,8 +20,12 @@ from civitas.contracts.mcp_product import (
     ApprovalReceipt,
     ApproveExecutionRequest,
     ApproveExecutionResponse,
+    BeginProviderConnectionRequest,
+    BeginProviderConnectionResponse,
     BusinessImpact,
     DecisionSummary,
+    EnableSandboxProviderRequest,
+    EnableSandboxProviderResponse,
     ExecuteApprovedPlanRequest,
     ExecuteApprovedPlanResponse,
     ExecutionAuditEntry,
@@ -31,6 +35,8 @@ from civitas.contracts.mcp_product import (
     GetExecutionAuditRequest,
     GetPlanningRunRequest,
     IntegritySummary,
+    ListConnectionsRequest,
+    ListConnectionsResponse,
     PageRequest,
     PlanningProgress,
     PlanningRun,
@@ -43,6 +49,9 @@ from civitas.contracts.mcp_product import (
     ProductError,
     ProductErrorCode,
     ProductServiceError,
+    ResumePlanningRunRequest,
+    UpdateSandboxOfferRequest,
+    UpdateSandboxOfferResponse,
 )
 from civitas.contracts.optimization import CandidatePlan, OptimizationRequest
 from civitas.ports.clock import Clock
@@ -137,6 +146,39 @@ class ProcurementApplicationFacade:
         self._clock = clock
         self._audit_link_for = audit_link_for
         self._policy_version = policy_version
+
+    async def list_connections(
+        self, context: OperatorContext, request: ListConnectionsRequest
+    ) -> ListConnectionsResponse:
+        del context, request
+        return ListConnectionsResponse(connections=())
+
+    async def begin_provider_connection(
+        self, context: OperatorContext, request: BeginProviderConnectionRequest
+    ) -> BeginProviderConnectionResponse:
+        del context, request
+        raise _error(
+            ProductErrorCode.INVESTIGATION_REQUIRED,
+            "provider connection management is not configured for this deployment",
+        )
+
+    async def enable_sandbox_provider(
+        self, context: OperatorContext, request: EnableSandboxProviderRequest
+    ) -> EnableSandboxProviderResponse:
+        del context, request
+        raise _error(ProductErrorCode.REJECTED_EXECUTION, "sandbox providers are disabled")
+
+    async def update_sandbox_offer(
+        self, context: OperatorContext, request: UpdateSandboxOfferRequest
+    ) -> UpdateSandboxOfferResponse:
+        del context, request
+        raise _error(ProductErrorCode.REJECTED_EXECUTION, "sandbox providers are disabled")
+
+    async def resume_planning_run(
+        self, context: OperatorContext, request: ResumePlanningRunRequest
+    ) -> PlanningRunResponse:
+        del context, request
+        raise _error(ProductErrorCode.NOT_FOUND, "paused planning run not found")
 
     async def plan_procurement_goal(
         self, context: OperatorContext, request: PlanProcurementGoalRequest
@@ -291,6 +333,8 @@ def _decision_summary(
         selected_plan_id=plan.plan_id if plan else None,
         selected_plan_hash=_plan_hash(plan) if plan else None,
         business_impact=impact,
+        procurement_lines=plan.procurement if plan else (),
+        distribution_lines=plan.distribution if plan else (),
         integrity=(
             IntegritySummary(
                 score=jury.integrity_score,

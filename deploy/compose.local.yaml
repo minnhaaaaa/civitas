@@ -25,6 +25,10 @@ services:
     image: civitas:local
     environment: &civitas-environment
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-civitas}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-civitas}
+      CIVITAS_APPROVAL_SECRET_PEPPER: ${CIVITAS_APPROVAL_SECRET_PEPPER:?set a 32-byte approval pepper}
+      CIVITAS_BEARER_TOKEN: ${CIVITAS_BEARER_TOKEN:?set a 32-character bearer token}
+      CIVITAS_ORGANIZATION_ID: ${CIVITAS_ORGANIZATION_ID:?bind an organization}
+      CIVITAS_OPERATOR_ID: ${CIVITAS_OPERATOR_ID:?bind an operator}
       CIVITAS_LOG_FORMAT: json
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -70,7 +74,7 @@ services:
     profiles: ["mcp"]
     image: civitas:local
     environment: *civitas-environment
-    command: ["python", "scripts/run_mcp_server.py"]
+    command: ["civitas-mcp"]
     ports:
       - "${CIVITAS_MCP_PORT:-8001}:8001"
     depends_on:

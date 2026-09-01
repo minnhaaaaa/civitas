@@ -1,314 +1,481 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Background,
-  MarkerType,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps,
-  type NodeTypes,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import type {
-  AuditViewSnapshot,
-  EvidenceGraphNodeData,
-  JuryCycleSnapshot,
-  WorkflowEvent,
-} from "./contracts";
-import { createMockAuditSnapshot } from "./mockPlayback";
+import { useEffect, useRef, useState } from "react";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { InstallTerminal } from "./InstallTerminal";
 
-const PUBLIC_REFERENCE_PATTERN = /^[A-Za-z0-9_-]{12,128}$/;
-type AuditRoute = { publicReference: string; runId: string; planId: string; cursor: number };
+gsap.registerPlugin(useGSAP, ScrollTrigger);
 
-function readAuditRoute(location: Location): AuditRoute | null {
-  const match = /^\/audit\/([^/]+)\/?$/.exec(location.pathname);
-  if (!match || !PUBLIC_REFERENCE_PATTERN.test(match[1]!)) return null;
-  const query = new URLSearchParams(location.search);
-  const runId = query.get("run");
-  const planId = query.get("plan");
-  const cursor = Number(query.get("cursor") ?? "0");
-  if (!runId || !planId || !Number.isSafeInteger(cursor) || cursor < 0) return null;
-  return { publicReference: match[1]!, runId, planId, cursor };
-}
+const agents = [
+  { name: "Demand", note: "Protect service levels" },
+  { name: "Cost", note: "Control landed cost" },
+  { name: "Freshness", note: "Protect shelf life" },
+  { name: "Logistics", note: "Keep delivery feasible" },
+  { name: "Supplier", note: "Reduce supply risk" },
+  { name: "Waste", note: "Prevent overbuying" },
+];
 
-function eventLabel(eventType: string): string {
-  return eventType.replaceAll(".", " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
+const evidenceChecks = [
+  ["Inventory", "Current"],
+  ["Supplier capacity", "Verified"],
+  ["Lead time", "Independent"],
+  ["Warehouse space", "Available"],
+] as const;
 
-function formatClock(isoTimestamp: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-  }).format(new Date(isoTimestamp));
-}
+type DemoState = "ready" | "running" | "complete";
 
-function EvidenceNode({ data }: NodeProps<Node<EvidenceGraphNodeData>>) {
-  return (
-    <div className={`audit-graph-node audit-graph-node--${data.kind}`}>
-      <span>{data.kind}</span>
-      <strong>{data.label}</strong>
-      <small>{data.detail}</small>
-    </div>
-  );
-}
-const nodeTypes: NodeTypes = { evidenceNode: EvidenceNode };
-
-function snapshotForRoute(route: AuditRoute): AuditViewSnapshot | null {
-  // Offline playback intentionally supports only its documented opaque reference.
-  if (route.publicReference !== "demo_false_consensus") return null;
-  const snapshot = createMockAuditSnapshot();
-  const maximumCursor = Math.max(...snapshot.events.map((event) => event.sequence));
-  return snapshot.run_id === route.runId &&
-    snapshot.selected_plan_id === route.planId &&
-    route.cursor <= maximumCursor
-    ? snapshot
-    : null;
-}
-
-async function fetchAuditSnapshot(
-  route: AuditRoute,
-  signal: AbortSignal,
-): Promise<AuditViewSnapshot> {
-  const response = await fetch(
-    `/api/audit/${encodeURIComponent(route.publicReference)}?cursor=${route.cursor}`,
-    { credentials: "same-origin", signal },
-  );
-  // Collapse authorization and lookup failures to avoid revealing protected record existence.
-  if (!response.ok) throw new Error("audit_unavailable");
-  const snapshot = (await response.json()) as AuditViewSnapshot;
-  const maximumCursor = Math.max(...snapshot.events.map((event) => event.sequence));
-  if (
-    snapshot.run_id !== route.runId ||
-    snapshot.selected_plan_id !== route.planId ||
-    route.cursor > maximumCursor
-  )
-    throw new Error("audit_unavailable");
-  return snapshot;
-}
-
-function AuditUnavailable() {
-  return (
-    <main className="audit-unavailable" aria-labelledby="audit-unavailable-title">
-      <p className="eyebrow">Civitas / Read-only audit</p>
-      <h1 id="audit-unavailable-title">This audit view is unavailable.</h1>
-      <p>
-        Check that you opened the complete audit link while signed in to the organization that owns
-        the decision.
-      </p>
-    </main>
-  );
+function Arrow() {
+  return <span aria-hidden="true">↗</span>;
 }
 
 export function App() {
-  const route = useMemo(() => readAuditRoute(window.location), []);
-  const mockSnapshot = route ? snapshotForRoute(route) : null;
-  const [snapshot, setSnapshot] = useState<AuditViewSnapshot | null>(mockSnapshot);
-  const [loading, setLoading] = useState(Boolean(route && !mockSnapshot));
+  const root = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [demoState, setDemoState] = useState<DemoState>("ready");
 
   useEffect(() => {
-    if (!route || mockSnapshot) return;
-    const controller = new AbortController();
-    void fetchAuditSnapshot(route, controller.signal)
-      .then(setSnapshot)
-      .catch(() => setSnapshot(null))
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [mockSnapshot, route]);
+    if (demoState !== "running") return;
+    const timer = window.setTimeout(() => setDemoState("complete"), 1800);
+    return () => window.clearTimeout(timer);
+  }, [demoState]);
 
-  const visibleEvents = useMemo(
-    () =>
-      snapshot && route ? snapshot.events.filter((event) => event.sequence <= route.cursor) : [],
-    [route, snapshot],
-  );
-  const currentCycle = useMemo(
-    () => Math.max(1, ...visibleEvents.map((event) => Number(event.payload.cycle) || 1)),
-    [visibleEvents],
-  );
-  const jury = useMemo<JuryCycleSnapshot | null>(
-    () =>
-      snapshot?.jury.find((item) => item.cycle === currentCycle) ?? snapshot?.jury.at(-1) ?? null,
-    [currentCycle, snapshot],
-  );
-  const graph = useMemo(
-    () =>
-      snapshot?.evidence_graphs.find((item) => item.cycle === currentCycle) ??
-      snapshot?.evidence_graphs.at(-1),
-    [currentCycle, snapshot],
-  );
-  const graphNodes = useMemo<Node<EvidenceGraphNodeData>[]>(
-    () => (graph?.nodes ?? []).map((node) => ({ ...node, type: "evidenceNode" })),
-    [graph],
-  );
-  const graphEdges = useMemo<Edge[]>(
-    () =>
-      (graph?.edges ?? []).map((edge) => ({
-        ...edge,
-        type: "smoothstep",
-        animated: edge.data.kind === "contradicts",
-        markerEnd: { type: MarkerType.ArrowClosed },
-      })),
-    [graph],
+  useGSAP(
+    () => {
+      const media = gsap.matchMedia();
+
+      media.add(
+        {
+          motion: "(prefers-reduced-motion: no-preference)",
+          desktop: "(min-width: 761px)",
+        },
+        (context) => {
+          if (!context.conditions?.motion) return;
+
+          gsap
+            .timeline({ defaults: { ease: "power3.out" } })
+            .from(".site-header", { y: -28, autoAlpha: 0, duration: 0.7 })
+            .from(".eyebrow", { y: 18, autoAlpha: 0, duration: 0.5 }, "-=0.25")
+            .from(
+              ".hero h1 span",
+              { yPercent: 105, autoAlpha: 0, duration: 0.85, stagger: 0.09 },
+              "-=0.25",
+            )
+            .from(".hero-bottom", { y: 24, autoAlpha: 0, duration: 0.6 }, "-=0.42")
+            .from(
+              ".orbit-agent, .orbit-core, .jury-stamp",
+              { scale: 0.55, autoAlpha: 0, duration: 0.6, stagger: 0.06 },
+              "-=0.55",
+            );
+
+          gsap.to(".orbit-line-one", { rotation: 360, duration: 34, repeat: -1, ease: "none" });
+          gsap.to(".orbit-line-two", { rotation: -360, duration: 25, repeat: -1, ease: "none" });
+          gsap.to(".jury-stamp", {
+            y: -9,
+            duration: 1.8,
+            repeat: -1,
+            yoyo: true,
+            ease: "sine.inOut",
+          });
+
+          gsap.utils.toArray<HTMLElement>(".reveal-heading").forEach((element) => {
+            gsap.from(element.children, {
+              y: 44,
+              autoAlpha: 0,
+              duration: 0.8,
+              stagger: 0.08,
+              ease: "power3.out",
+              scrollTrigger: { trigger: element, start: "top 82%", once: true },
+            });
+          });
+
+          gsap.from(".statement-lines > div", {
+            x: (index) => (index % 2 === 0 ? -55 : 55),
+            autoAlpha: 0,
+            duration: 0.85,
+            stagger: 0.12,
+            ease: "power3.out",
+            scrollTrigger: { trigger: ".statement-lines", start: "top 78%", once: true },
+          });
+
+          gsap.from(".agent-grid article", {
+            y: 50,
+            autoAlpha: 0,
+            duration: 0.65,
+            stagger: 0.08,
+            ease: "power2.out",
+            scrollTrigger: { trigger: ".agent-grid", start: "top 78%", once: true },
+          });
+
+          gsap.from(".integrity-card", {
+            x: context.conditions.desktop ? 70 : 0,
+            y: context.conditions.desktop ? 0 : 45,
+            autoAlpha: 0,
+            duration: 0.9,
+            ease: "power3.out",
+            scrollTrigger: { trigger: ".integrity-card", start: "top 80%", once: true },
+          });
+
+          gsap.from(".score-path", {
+            strokeDasharray: "0 100",
+            duration: 1.2,
+            ease: "power2.out",
+            scrollTrigger: { trigger: ".integrity-card", start: "top 72%", once: true },
+          });
+
+          gsap.from(".decision-console", {
+            y: 65,
+            autoAlpha: 0,
+            duration: 0.9,
+            ease: "power3.out",
+            scrollTrigger: { trigger: ".decision-console", start: "top 84%", once: true },
+          });
+        },
+      );
+
+      return () => media.revert();
+    },
+    { scope: root },
   );
 
-  if (!route || (!loading && !snapshot) || !jury) return <AuditUnavailable />;
-  if (loading || !snapshot)
-    return <main className="audit-unavailable">Loading read-only audit…</main>;
+  useGSAP(
+    () => {
+      if (demoState === "running") {
+        gsap.to(".evidence-list i", {
+          scale: 1.7,
+          backgroundColor: "#c9f36b",
+          duration: 0.42,
+          repeat: -1,
+          yoyo: true,
+          stagger: 0.11,
+          ease: "sine.inOut",
+        });
+      }
+
+      if (demoState === "complete") {
+        gsap.from(".console-verdict strong", {
+          y: 18,
+          autoAlpha: 0,
+          duration: 0.5,
+          stagger: 0.1,
+          ease: "back.out(1.5)",
+        });
+        gsap.from(".evidence-list b", { autoAlpha: 0, duration: 0.35, stagger: 0.06 });
+      }
+    },
+    { dependencies: [demoState], scope: root, revertOnUpdate: true },
+  );
 
   return (
-    <div className="audit-viewer">
-      <a className="skip-link" href="#audit-main">
-        Skip to audit record
+    <div className="site-shell" ref={root}>
+      <a className="skip-link" href="#main">
+        Skip to content
       </a>
-      <header className="audit-header">
-        <a className="wordmark" href="#audit-main" translate="no" aria-label="Civitas audit record">
-          <span className="wordmark__seal" aria-hidden="true">
-            C
-          </span>
+      <header className="site-header">
+        <a
+          className="brand"
+          href="#top"
+          onClick={() => setMenuOpen(false)}
+          aria-label="Civitas home"
+        >
           <span>Civitas</span>
         </a>
-        <p>Read-only decision record</p>
+        <nav className={`pill-nav ${menuOpen ? "is-open" : ""}`} aria-label="Primary navigation">
+          <a href="#why" onClick={() => setMenuOpen(false)}>
+            Why
+          </a>
+          <a href="#parliament" onClick={() => setMenuOpen(false)}>
+            Parliament
+          </a>
+          <a href="#proof" onClick={() => setMenuOpen(false)}>
+            Jury
+          </a>
+          <a href="#install" onClick={() => setMenuOpen(false)}>
+            Install
+          </a>
+          <a href="#demo" onClick={() => setMenuOpen(false)}>
+            Demo
+          </a>
+        </nav>
+        <a className="header-cta" href="#install">
+          Install MCP <Arrow />
+        </a>
+        <button
+          className="menu-button"
+          type="button"
+          aria-label="Toggle navigation"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <span />
+          <span />
+        </button>
       </header>
-      <main id="audit-main" className="audit-main">
-        <section className="audit-masthead" aria-labelledby="audit-title">
-          <div>
-            <p className="eyebrow">Procurement decision / Event {route.cursor}</p>
-            <h1 id="audit-title">{snapshot.title}</h1>
-            <p>{snapshot.summary}</p>
-          </div>
-          <dl className="audit-identifiers">
-            <div>
-              <dt>Run</dt>
-              <dd>{snapshot.run_id}</dd>
+
+      <main id="main">
+        <section className="hero" id="top">
+          <div className="hero-copy">
+            <p className="eyebrow">
+              <i /> Autonomous procurement
+            </p>
+            <h1>
+              <span>Food buying</span>
+              <span className="hero-indent">that can</span>
+              <span className="hero-outline">prove itself.</span>
+            </h1>
+            <div className="hero-bottom">
+              <p>Six agents debate. A Jury checks the proof before anything is bought.</p>
+              <a className="primary-button" href="#install">
+                Install in your agent <Arrow />
+              </a>
             </div>
-            <div>
-              <dt>Selected plan</dt>
-              <dd>{snapshot.selected_plan_id}</dd>
-            </div>
-            <div>
-              <dt>Public record</dt>
-              <dd>{route.publicReference}</dd>
-            </div>
-          </dl>
-        </section>
-        <section className="audit-overview" aria-label="Decision status">
-          <div className={`audit-state audit-state--${jury.state}`}>
-            <span>Jury state</span>
-            <strong>{jury.state}</strong>
           </div>
-          <div>
-            <span>Decision Integrity</span>
-            <strong>{jury.integrity_score}</strong>
-            <small>Policy {snapshot.policy_version}</small>
-          </div>
-          <div>
-            <span>Event cursor</span>
-            <strong>{route.cursor}</strong>
-            <small>{visibleEvents.length} visible events</small>
-          </div>
-          <div>
-            <span>Execution</span>
-            <strong>{snapshot.execution.current_state.replaceAll("_", " ")}</strong>
-            <small>Receipt only</small>
-          </div>
-        </section>
-        <section className="audit-section" aria-labelledby="lineage-title">
-          <header>
-            <p className="eyebrow">Evidence lineage / Cycle {currentCycle}</p>
-            <h2 id="lineage-title">What supports this decision</h2>
-          </header>
-          <div className="audit-graph" role="img" aria-label="Read-only evidence lineage graph">
-            <ReactFlow
-              fitView
-              nodes={graphNodes}
-              edges={graphEdges}
-              nodeTypes={nodeTypes}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              panOnDrag
-              zoomOnScroll={false}
-              zoomOnPinch
-              minZoom={0.55}
-              maxZoom={1.5}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="rgba(33, 55, 44, 0.12)" gap={28} />
-            </ReactFlow>
-          </div>
-          <p className="audit-caption">
-            Source groups and contradictions are shown for inspection only. This viewer cannot
-            approve, refresh, or execute a plan.
-          </p>
-        </section>
-        <div className="audit-grid">
-          <section className="audit-section" aria-labelledby="integrity-title">
-            <header>
-              <p className="eyebrow">Integrity v1</p>
-              <h2 id="integrity-title">Components and hard gates</h2>
-            </header>
-            <dl className="audit-components">
-              {Object.entries(jury.components).map(([name, score]) => (
-                <div key={name}>
-                  <dt>{name.replaceAll("_", " ")}</dt>
-                  <dd>{score}</dd>
-                </div>
-              ))}
-            </dl>
-            <ul className="audit-gates">
-              {jury.gates.map((gate) => (
-                <li key={gate.gate_code} className={gate.passed ? "is-passed" : "is-blocked"}>
-                  <span>{gate.gate_code.replaceAll("-", " ")}</span>
-                  <strong>{gate.passed ? "Pass" : "Blocked"}</strong>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="audit-section" aria-labelledby="timeline-title">
-            <header>
-              <p className="eyebrow">Replanning timeline</p>
-              <h2 id="timeline-title">How the case changed</h2>
-            </header>
-            <ol className="audit-timeline">
-              {visibleEvents.map((event: WorkflowEvent) => (
-                <li key={event.event_id}>
-                  <time dateTime={event.occurred_at}>{formatClock(event.occurred_at)}</time>
-                  <div>
-                    <strong>{eventLabel(event.event_type)}</strong>
-                    <p>
-                      {String(
-                        event.payload.note ??
-                          event.payload.detail ??
-                          "Recorded workflow transition.",
-                      )}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
-        <section className="audit-section audit-receipt" aria-labelledby="receipt-title">
-          <header>
-            <p className="eyebrow">Immutable execution receipt</p>
-            <h2 id="receipt-title">{snapshot.execution.approved_plan_id}</h2>
-          </header>
-          <p>{snapshot.execution.detail}</p>
-          <ol>
-            {snapshot.execution.steps.map((step) => (
-              <li key={step.label}>
-                <strong>{step.label}</strong>
-                <span>{step.state.replaceAll("_", " ")}</span>
-                <small>{step.detail}</small>
-              </li>
+
+          <div
+            className="parliament-orbit"
+            aria-label="Six procurement agents surrounding a solver-validated plan"
+          >
+            <div className="orbit-line orbit-line-one" />
+            <div className="orbit-line orbit-line-two" />
+            {agents.map((agent, index) => (
+              <div className={`orbit-agent orbit-agent-${index + 1}`} key={agent.name}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <strong>{agent.name}</strong>
+              </div>
             ))}
-          </ol>
+            <div className="orbit-core">
+              <small>Solver plan</small>
+              <strong>P–04</strong>
+              <span>Feasible</span>
+            </div>
+            <div className="jury-stamp">
+              <small>Independent</small>
+              <strong>Jury</strong>
+            </div>
+          </div>
+          <a className="scroll-note" href="#why">
+            The case for Civitas <span>↓</span>
+          </a>
+        </section>
+
+        <section className="proof-statement" id="why">
+          <p className="section-tag">The problem</p>
+          <div className="statement-lines">
+            <div>
+              <span>Agent agreement</span>
+              <b>is not</b>
+            </div>
+            <div>
+              <span>Independent evidence</span>
+              <b>is not</b>
+            </div>
+            <div className="statement-final">
+              <span>A correct decision.</span>
+              <i>That gap is where Civitas works.</i>
+            </div>
+          </div>
+        </section>
+
+        <section className="parliament-section" id="parliament">
+          <header className="section-heading reveal-heading">
+            <p className="section-tag">The Parliament</p>
+            <h2>
+              Six objectives.
+              <br />
+              One feasible plan.
+            </h2>
+            <p>Agents debate trade-offs. OR-Tools builds the allocation.</p>
+          </header>
+          <div className="agent-grid">
+            {agents.map((agent, index) => (
+              <article key={agent.name}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <h3>{agent.name}</h3>
+                <p>{agent.note}</p>
+                <i aria-hidden="true">↗</i>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="jury-section" id="proof">
+          <div className="jury-copy reveal-heading">
+            <p className="section-tag">The Jury</p>
+            <h2>
+              Consensus
+              <br />
+              doesn’t get
+              <br />a free pass.
+            </h2>
+            <p>Claims are checked for source, freshness, and contradiction.</p>
+          </div>
+          <div className="integrity-card">
+            <div className="integrity-topline">
+              <span>Decision integrity / v1</span>
+              <i>Approve-eligible</i>
+            </div>
+            <div className="integrity-score">
+              <strong>92</strong>
+              <span>/100</span>
+              <svg
+                viewBox="0 0 180 90"
+                role="img"
+                aria-label="Decision integrity score 92 out of 100"
+              >
+                <path d="M10 85 A80 80 0 0 1 170 85" pathLength="100" />
+                <path className="score-path" d="M10 85 A80 80 0 0 1 170 85" pathLength="100" />
+              </svg>
+            </div>
+            <div className="integrity-rows">
+              <div>
+                <span>Evidence coverage</span>
+                <b>96</b>
+              </div>
+              <div>
+                <span>Source independence</span>
+                <b>88</b>
+              </div>
+              <div>
+                <span>Freshness</span>
+                <b>94</b>
+              </div>
+              <div>
+                <span>Dissent robustness</span>
+                <b>90</b>
+              </div>
+            </div>
+            <footer>
+              <i /> All hard gates passed
+            </footer>
+          </div>
+        </section>
+
+        <section className="install-section" id="install">
+          <header className="install-heading reveal-heading">
+            <p className="section-tag">Run Civitas where you work</p>
+            <h2>
+              One command.
+              <br />
+              Your agent gets a Parliament.
+            </h2>
+            <p>
+              Register the local sandbox in Codex, Claude Code, or any standard MCP client. No
+              database, provider credentials, or purchase authority required.
+            </p>
+          </header>
+          <InstallTerminal />
+          <div className="install-facts" aria-label="Installation facts">
+            <span>01 / Local STDIO</span>
+            <span>02 / Side-effect-safe sandbox</span>
+            <span>03 / Production path documented</span>
+          </div>
+        </section>
+
+        <section className="demo-section" id="demo">
+          <header className="section-heading demo-heading reveal-heading">
+            <p className="section-tag">A decision, end to end</p>
+            <h2>
+              Ask once.
+              <br />
+              See the proof.
+            </h2>
+          </header>
+          <div className={`decision-console state-${demoState}`}>
+            <div className="console-bar">
+              <span>
+                <i /> Civitas / live simulation
+              </span>
+              <small>RUN–0828</small>
+            </div>
+            <div className="operator-request">
+              <span>Operator</span>
+              <p>Cover tomorrow’s demand. Minimize cost and waste. Ask before buying.</p>
+            </div>
+            <div className="console-body">
+              <div className="evidence-list">
+                {evidenceChecks.map(([label, status]) => (
+                  <div key={label}>
+                    <i />
+                    <span>{label}</span>
+                    <b>
+                      {demoState === "ready"
+                        ? "Queued"
+                        : demoState === "running"
+                          ? "Checking"
+                          : status}
+                    </b>
+                  </div>
+                ))}
+              </div>
+              <div className="console-verdict">
+                <div>
+                  <span>Candidate plan</span>
+                  <strong>{demoState === "complete" ? "P–04" : "—"}</strong>
+                  <small>
+                    {demoState === "complete"
+                      ? "220 kg · ₹8,140 ceiling"
+                      : "Awaiting investigation"}
+                  </small>
+                </div>
+                <div>
+                  <span>Jury verdict</span>
+                  <strong>
+                    {demoState === "complete"
+                      ? "Approve"
+                      : demoState === "running"
+                        ? "Reviewing"
+                        : "—"}
+                  </strong>
+                  <small>
+                    {demoState === "complete"
+                      ? "Human approval still required"
+                      : "No decision without evidence"}
+                  </small>
+                </div>
+              </div>
+            </div>
+            <div className="console-footer">
+              <span>
+                {demoState === "complete"
+                  ? "Decision ready · approval required"
+                  : "Sandbox simulation"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setDemoState("running")}
+                disabled={demoState === "running"}
+              >
+                {demoState === "ready" && "Run the Parliament"}
+                {demoState === "running" && "Investigating…"}
+                {demoState === "complete" && "Run again"}
+                <Arrow />
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="closing-section">
+          <h2>
+            Let the agents argue.
+            <br />
+            <span>Trust the evidence.</span>
+          </h2>
+          <a
+            className="closing-link"
+            href="https://github.com/minnhaaaaa/civitas"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Explore Civitas <Arrow />
+          </a>
         </section>
       </main>
-      <footer className="audit-footer">
-        Civitas audit viewer · Read-only · Execution authority remains with the guarded service
+
+      <footer className="site-footer">
+        <a className="brand" href="#top">
+          <span>Civitas</span>
+        </a>
+        <p>Accountable autonomous procurement.</p>
+        <span>2026</span>
       </footer>
     </div>
   );
