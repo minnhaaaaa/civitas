@@ -135,9 +135,7 @@ class LocalMCPTransport:
 
     def _capability(self, tool: Any) -> ProviderToolCapability:
         access_mode = (
-            MCPAccessMode.WRITE
-            if tool.name in self._write_tool_names
-            else MCPAccessMode.READ
+            MCPAccessMode.WRITE if tool.name in self._write_tool_names else MCPAccessMode.READ
         )
         annotations = getattr(tool, "annotations", None)
         idempotent = bool(

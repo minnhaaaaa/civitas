@@ -244,7 +244,7 @@ export function LandingPage() {
             ))}
             <div className="orbit-core">
               <small>Solver plan</small>
-              <strong>P–04</strong>
+              <strong>P-04</strong>
               <span>Feasible</span>
             </div>
             <div className="jury-stamp">
@@ -358,15 +358,15 @@ export function LandingPage() {
               Your agent gets a Parliament.
             </h2>
             <p>
-              Register the local sandbox in Codex, Claude Code, or any standard MCP client. No
-              database, provider credentials, or purchase authority required.
+              Try the sandbox, or connect your own inventory and supplier MCPs. Everything runs on
+              your machine.
             </p>
           </header>
           <InstallTerminal />
           <div className="install-facts" aria-label="Installation facts">
-            <span>01 / Local STDIO</span>
-            <span>02 / Side-effect-safe sandbox</span>
-            <span>03 / Production path documented</span>
+            <span>01 / Local first</span>
+            <span>02 / Your MCPs</span>
+            <span>03 / Guarded writes</span>
           </div>
         </section>
 
@@ -384,7 +384,7 @@ export function LandingPage() {
               <span>
                 <i /> Civitas / live simulation
               </span>
-              <small>RUN–0828</small>
+              <small>RUN-0828</small>
             </div>
             <div className="operator-request">
               <span>Operator</span>
@@ -409,7 +409,7 @@ export function LandingPage() {
               <div className="console-verdict">
                 <div>
                   <span>Candidate plan</span>
-                  <strong>{demoState === "complete" ? "P–04" : "—"}</strong>
+                  <strong>{demoState === "complete" ? "P-04" : "Pending"}</strong>
                   <small>
                     {demoState === "complete"
                       ? "220 kg · ₹8,140 ceiling"
@@ -423,7 +423,7 @@ export function LandingPage() {
                       ? "Approve"
                       : demoState === "running"
                         ? "Reviewing"
-                        : "—"}
+                        : "Pending"}
                   </strong>
                   <small>
                     {demoState === "complete"

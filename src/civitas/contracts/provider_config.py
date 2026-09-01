@@ -34,18 +34,14 @@ class StdioMCPTransport(Contract):
     kind: Literal["stdio"] = "stdio"
     command: str = Field(min_length=1, max_length=1_024)
     args: tuple[str, ...] = Field(default=(), max_length=100)
-    credential_env_refs: dict[ProviderAccessContext, dict[str, str]] = Field(
-        default_factory=dict
-    )
+    credential_env_refs: dict[ProviderAccessContext, dict[str, str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_process_configuration(self) -> StdioMCPTransport:
         if "\x00" in self.command or any("\x00" in argument for argument in self.args):
             raise ValueError("STDIO command and arguments cannot contain NUL bytes")
         for child_environment, local_reference in (
-            item
-            for references in self.credential_env_refs.values()
-            for item in references.items()
+            item for references in self.credential_env_refs.values() for item in references.items()
         ):
             if not _ENVIRONMENT_NAME.fullmatch(child_environment):
                 raise ValueError("child credential environment names must be uppercase identifiers")
@@ -150,9 +146,7 @@ class LocalProviderConfiguration(Contract):
         if len(provider_ids) != len(set(provider_ids)):
             raise ValueError("provider identifiers must be unique")
         known_providers = set(provider_ids)
-        unknown = sorted(
-            {binding.provider_id for binding in self.bindings} - known_providers
-        )
+        unknown = sorted({binding.provider_id for binding in self.bindings} - known_providers)
         if unknown:
             raise ValueError("binding references unknown provider: " + ", ".join(unknown))
         active_capabilities = [

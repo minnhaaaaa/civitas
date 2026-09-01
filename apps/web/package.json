@@ -9,6 +9,7 @@
     "format": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
     "preview": "vite preview",
+    "test:copy": "node scripts/check-copy.mjs",
     "typecheck": "tsc -b"
   },
   "dependencies": {

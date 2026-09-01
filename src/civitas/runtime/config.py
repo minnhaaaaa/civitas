@@ -86,9 +86,7 @@ class RuntimeSettings:
             raise SettingsError("heartbeat interval must be shorter than worker readiness TTL")
         if self.provider_factory is not None and self.provider_config_path is not None:
             raise SettingsError("configure only one provider bootstrap")
-        if self.live_provider_required and not (
-            self.provider_factory or self.provider_config_path
-        ):
+        if self.live_provider_required and not (self.provider_factory or self.provider_config_path):
             raise SettingsError(
                 "CIVITAS_PROVIDER_FACTORY or CIVITAS_PROVIDER_CONFIG is required "
                 "when live provider mode is required"

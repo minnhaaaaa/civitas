@@ -150,11 +150,7 @@ class LocalCapabilityRouter:
         except ValueError as error:
             raise MCPAccessError("unknown canonical provider capability") from error
         binding = next(
-            (
-                item
-                for item in self._context_bindings()
-                if item.canonical_capability is canonical
-            ),
+            (item for item in self._context_bindings() if item.canonical_capability is canonical),
             None,
         )
         if binding is None:
@@ -177,11 +173,7 @@ class LocalCapabilityRouter:
 
 
 def _access_mode(capability: CanonicalCapability) -> MCPAccessMode:
-    return (
-        MCPAccessMode.WRITE
-        if capability in _WRITE_CAPABILITIES
-        else MCPAccessMode.READ
-    )
+    return MCPAccessMode.WRITE if capability in _WRITE_CAPABILITIES else MCPAccessMode.READ
 
 
 def _map_request(source: JsonObject, mapping: CapabilityMapping) -> JsonObject:

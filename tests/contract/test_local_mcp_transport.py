@@ -63,9 +63,7 @@ def _provider() -> ProviderDefinition:
             command="uvx",
             args=("warehouse-mcp", "--region", "north"),
             credential_env_refs={
-                ProviderAccessContext.PLANNING: {
-                    "WAREHOUSE_TOKEN": "WAREHOUSE_PLANNING_TOKEN"
-                }
+                ProviderAccessContext.PLANNING: {"WAREHOUSE_TOKEN": "WAREHOUSE_PLANNING_TOKEN"}
             },
         ),
     )

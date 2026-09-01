@@ -31,13 +31,15 @@ The MCP server and durable worker use the production composition and PostgreSQL
 checkpoint queue. Local Compose defaults to the in-process, made-up operational
 MCP provider in `civitas.runtime.simulated_provider`; it supplies all six planning
 read capabilities and an idempotent mock purchase-order write, and refuses to
-start in production. Provider reads and writes fail closed unless
-`CIVITAS_PROVIDER_FACTORY` names a
-`module:callable` that returns `ProviderRuntimeDependencies`. Its planning
+start in production. Provider reads and writes fail closed unless either
+`CIVITAS_PROVIDER_CONFIG` points to an explicit local configuration or
+`CIVITAS_PROVIDER_FACTORY` names a `module:callable` that returns
+`ProviderRuntimeDependencies`. Configure only one. Its planning
 connection must contain the credential-isolated read-only Dissent client; its
 execution connection is used only by guarded execution after approval,
 freshness, locking, and idempotency checks. Set
-`CIVITAS_LIVE_PROVIDER_REQUIRED=true` to make a missing factory a startup error.
+`CIVITAS_LIVE_PROVIDER_REQUIRED=true` to make a missing provider bootstrap a
+startup error.
 See [provider onboarding](PROVIDER_ONBOARDING.md) to replace the demo provider
 with a user's server.
 

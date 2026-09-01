@@ -63,9 +63,11 @@ Any STDIO-compatible MCP client can use this standard server definition:
 }
 ```
 
-The production entry point is `civitas-mcp`. It deliberately fails startup
-without PostgreSQL, authenticated organization/operator bindings, and strong
-approval credentials; see [the deployment guide](docs/DEPLOYMENT.md).
+The production entry point is `civitas-mcp`. Users can explicitly route its
+inventory, demand, supplier, capacity, and purchase-order capabilities across
+their own local or private MCP servers. Credentials remain environment
+references on their machine. See [provider setup](docs/PROVIDER_ONBOARDING.md)
+and [the deployment guide](docs/DEPLOYMENT.md).
 
 ## Development
 

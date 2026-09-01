@@ -113,9 +113,7 @@ async def test_runtime_composes_reads_dissent_and_approval_bound_execution() -> 
             ProviderToolCapability(
                 name=binding.tool_name,
                 access_mode=(
-                    MCPAccessMode.WRITE
-                    if binding.tool_name in write_tools
-                    else MCPAccessMode.READ
+                    MCPAccessMode.WRITE if binding.tool_name in write_tools else MCPAccessMode.READ
                 ),
                 idempotent=binding.tool_name in write_tools,
             )
