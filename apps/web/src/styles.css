@@ -666,6 +666,7 @@ button {
   box-shadow: 24px 24px 0 var(--green);
 }
 .terminal-chrome,
+.terminal-mode-tabs,
 .terminal-tabs {
   display: flex;
   align-items: center;
@@ -694,11 +695,16 @@ button {
   background: var(--lime);
   border-color: var(--lime);
 }
+.terminal-mode-tabs,
 .terminal-tabs {
   min-height: 48px;
   padding: 0 12px;
   gap: 5px;
 }
+.terminal-mode-tabs {
+  background: rgba(201, 243, 107, 0.05);
+}
+.terminal-mode-tabs button,
 .terminal-tabs button {
   min-height: 34px;
   padding: 0 14px;
@@ -709,6 +715,8 @@ button {
   text-transform: uppercase;
   cursor: pointer;
 }
+.terminal-mode-tabs button:hover,
+.terminal-mode-tabs button.is-active,
 .terminal-tabs button:hover,
 .terminal-tabs button.is-active {
   border-color: rgba(201, 243, 107, 0.4);

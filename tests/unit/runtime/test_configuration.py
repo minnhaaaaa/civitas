@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +30,40 @@ def test_live_provider_mode_requires_explicit_factory() -> None:
         replace(_settings(), live_provider_required=True)
     with pytest.raises(SettingsError, match="module:callable"):
         replace(_settings(), provider_factory="provider.factory")
+
+
+def test_live_provider_mode_accepts_local_provider_configuration() -> None:
+    settings = replace(
+        _settings(),
+        live_provider_required=True,
+        provider_config_path=Path("/etc/civitas/providers.json"),
+    )
+
+    assert settings.provider_config_path == Path("/etc/civitas/providers.json")
+
+
+def test_provider_factory_and_local_configuration_are_mutually_exclusive() -> None:
+    with pytest.raises(SettingsError, match="only one provider bootstrap"):
+        replace(
+            _settings(),
+            provider_factory="package.module:create_dependencies",
+            provider_config_path=Path("/etc/civitas/providers.json"),
+        )
+
+
+def test_environment_loads_local_provider_configuration_path() -> None:
+    settings = RuntimeSettings.from_env(
+        {
+            "DATABASE_URL": _settings().database_url,
+            "CIVITAS_APPROVAL_SECRET_PEPPER": "a" * 32,
+            "CIVITAS_BEARER_TOKEN": "b" * 32,
+            "CIVITAS_ORGANIZATION_ID": "org-1",
+            "CIVITAS_OPERATOR_ID": "operator-1",
+            "CIVITAS_PROVIDER_CONFIG": "/srv/civitas/providers.json",
+        }
+    )
+
+    assert settings.provider_config_path == Path("/srv/civitas/providers.json")
 
 
 def test_production_rejects_checked_in_local_secret_examples() -> None:

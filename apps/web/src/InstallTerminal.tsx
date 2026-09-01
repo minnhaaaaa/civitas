@@ -1,37 +1,63 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type Client = "codex" | "claude" | "json";
+type Setup = "sandbox" | "connect";
+type Option = "codex" | "claude" | "json" | "stdio" | "http";
 
 const repository = "git+https://github.com/minnhaaaaa/civitas";
 
-const installers: Record<Client, { label: string; command: string }> = {
-  codex: {
-    label: "Codex",
-    command: `codex mcp add civitas -- uvx --from ${repository} civitas-mcp-demo`,
+const commands: Record<Setup, Partial<Record<Option, { label: string; command: string }>>> = {
+  sandbox: {
+    codex: {
+      label: "Codex",
+      command: `codex mcp add civitas -- uvx --from ${repository} civitas-mcp-demo`,
+    },
+    claude: {
+      label: "Claude Code",
+      command: `claude mcp add civitas --scope user -- uvx --from ${repository} civitas-mcp-demo`,
+    },
+    json: {
+      label: "MCP JSON",
+      command: `{"mcpServers":{"civitas":{"command":"uvx","args":["--from","${repository}","civitas-mcp-demo"]}}}`,
+    },
   },
-  claude: {
-    label: "Claude Code",
-    command: `claude mcp add civitas --scope user -- uvx --from ${repository} civitas-mcp-demo`,
-  },
-  json: {
-    label: "MCP JSON",
-    command: `{"mcpServers":{"civitas":{"command":"uvx","args":["--from","${repository}","civitas-mcp-demo"]}}}`,
+  connect: {
+    stdio: {
+      label: "Local STDIO",
+      command: `uvx --from ${repository} civitas providers add operations --name "Operations MCP" --transport stdio --command your-mcp-command`,
+    },
+    http: {
+      label: "Private HTTP",
+      command: `uvx --from ${repository} civitas providers add operations --name "Operations MCP" --transport http --url https://your-mcp.example/mcp`,
+    },
   },
 };
 
-const resultLines = [
-  ["resolve", "Civitas package fetched from GitHub"],
-  ["connect", "STDIO server registered as civitas"],
-  ["ready", "12 intent-level tools available"],
-] as const;
+const options: Record<Setup, readonly [Option, ...Option[]]> = {
+  sandbox: ["codex", "claude", "json"],
+  connect: ["stdio", "http"],
+};
+
+const outputs: Record<Setup, readonly (readonly [string, string])[]> = {
+  sandbox: [
+    ["install", "Civitas registered locally"],
+    ["ready", "Simulated procurement tools available"],
+  ],
+  connect: [
+    ["saved", "Provider reference stored on this machine"],
+    ["next", "Map its tools, then enable live mode"],
+  ],
+};
 
 export function InstallTerminal() {
   const host = useRef<HTMLDivElement>(null);
-  const [client, setClient] = useState<Client>("codex");
+  const [setup, setSetup] = useState<Setup>("sandbox");
+  const [option, setOption] = useState<Option>("codex");
   const [visible, setVisible] = useState(false);
   const [typedLength, setTypedLength] = useState(0);
   const [copied, setCopied] = useState(false);
-  const command = installers[client].command;
+  const selected = commands[setup][option] ?? commands[setup][options[setup][0]];
+  if (!selected) throw new Error("Missing installer command");
+  const { command } = selected;
   const prefersReducedMotion = useMemo(
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     [],
@@ -62,11 +88,16 @@ export function InstallTerminal() {
           window.clearInterval(timer);
           return length;
         }
-        return Math.min(command.length, length + 2);
+        return Math.min(command.length, length + 3);
       });
-    }, 16);
+    }, 14);
     return () => window.clearInterval(timer);
-  }, [client, command, prefersReducedMotion, visible]);
+  }, [command, prefersReducedMotion, visible]);
+
+  function chooseSetup(next: Setup) {
+    setSetup(next);
+    setOption(options[next][0]);
+  }
 
   async function handleCopy() {
     await navigator.clipboard.writeText(command);
@@ -82,33 +113,47 @@ export function InstallTerminal() {
           <i />
           <i />
         </span>
-        <span>civitas / installer</span>
-        <span>stdio</span>
+        <span>civitas / local setup</span>
+        <span>{setup}</span>
       </div>
-      <div className="terminal-tabs" role="tablist" aria-label="MCP client">
-        {(Object.keys(installers) as Client[]).map((key) => (
+      <div className="terminal-mode-tabs" role="tablist" aria-label="Setup type">
+        {(["sandbox", "connect"] as Setup[]).map((key) => (
           <button
             type="button"
             role="tab"
-            aria-selected={client === key}
-            className={client === key ? "is-active" : ""}
-            onClick={() => setClient(key)}
+            aria-selected={setup === key}
+            className={setup === key ? "is-active" : ""}
+            onClick={() => chooseSetup(key)}
             key={key}
           >
-            {installers[key].label}
+            {key === "sandbox" ? "Try sandbox" : "Connect your MCP"}
           </button>
         ))}
+      </div>
+      <div className="terminal-tabs" role="tablist" aria-label="Setup option">
+        {options[setup].map((key) => {
+          const item = commands[setup][key];
+          if (!item) return null;
+          return (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={option === key}
+              className={option === key ? "is-active" : ""}
+              onClick={() => setOption(key)}
+              key={key}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
       <div className="terminal-body">
         <div className="terminal-command">
           <span aria-hidden="true">$</span>
           <code>{command.slice(0, typedLength)}</code>
           <i className="terminal-cursor" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={handleCopy}
-            aria-label={`Copy ${installers[client].label} setup`}
-          >
+          <button type="button" onClick={handleCopy} aria-label={`Copy ${selected.label} setup`}>
             {copied ? "Copied" : "Copy"}
           </button>
         </div>
@@ -116,15 +161,17 @@ export function InstallTerminal() {
           className={`terminal-output ${typedLength === command.length ? "is-visible" : ""}`}
           aria-live="polite"
         >
-          {resultLines.map(([status, message]) => (
+          {outputs[setup].map(([status, message]) => (
             <p key={status}>
               <span>{status}</span>
               {message}
             </p>
           ))}
           <p className="terminal-success">
-            <span>ready</span>
-            Ask your agent: “Plan tomorrow’s food procurement with Civitas.”
+            <span>local</span>
+            {setup === "sandbox"
+              ? "Run the full simulated workflow without purchase authority."
+              : "Credentials stay in your environment and never enter the config file."}
           </p>
         </div>
       </div>
@@ -137,8 +184,10 @@ export function InstallTerminal() {
         >
           uv
         </a>
-        . This command installs the side-effect-safe sandbox. Production execution remains
-        approval-gated and separately configured.
+        .{" "}
+        <a href="https://github.com/minnhaaaaa/civitas/blob/main/docs/PROVIDER_ONBOARDING.md">
+          Provider setup guide
+        </a>
       </p>
     </div>
   );

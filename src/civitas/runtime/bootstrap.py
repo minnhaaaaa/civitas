@@ -30,6 +30,10 @@ async def load_provider_runtime(
     settings: RuntimeSettings,
 ) -> ProviderRuntimeDependencies | None:
     path = settings.provider_factory
+    if path is None and settings.provider_config_path is not None:
+        from civitas.runtime.local_provider import create_dependencies
+
+        return await create_dependencies(settings)
     if path is None:
         if settings.live_provider_required:
             raise SettingsError("live provider dependencies are required")
