@@ -14,7 +14,7 @@ from civitas.contracts.provider_config import ProviderDefinition, StdioMCPTransp
 from civitas.contracts.providers import ProviderAccessContext
 from civitas.contracts.tools import MCPAccessMode, MCPToolCall
 from civitas.integrations.local_mcp import LocalMCPTransport, stdio_server_parameters
-from civitas.integrations.mcp import MCPAccessError
+from civitas.integrations.mcp import MCPAccessError, MCPInvocationError
 
 
 class FakeSession:
@@ -192,3 +192,35 @@ async def test_provider_error_content_is_not_reflected_in_public_error_message()
     assert result.error_code == "provider_tool_error"
     assert result.error_message == "provider tool returned an error"
     assert "must-not-leak" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_oversized_provider_payload() -> None:
+    class OversizedSession(FakeSession):
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
+            del name, arguments
+            return CallToolResult(
+                content=[],
+                structuredContent={"payload": "x" * (1_048_576 + 1)},
+            )
+
+    @asynccontextmanager
+    async def open_session() -> AsyncIterator[OversizedSession]:
+        yield OversizedSession()
+
+    transport = LocalMCPTransport(
+        provider=_provider(),
+        context=ProviderAccessContext.PLANNING,
+        session_factory=open_session,
+    )
+
+    with pytest.raises(MCPInvocationError, match="invalid structured payload"):
+        await transport.invoke(
+            MCPToolCall(
+                call_id="call-large",
+                server_name="warehouse",
+                tool_name="get_stock",
+                arguments={},
+                access_mode=MCPAccessMode.READ,
+            )
+        )

@@ -68,6 +68,8 @@ class HttpMCPTransport(Contract):
             raise ValueError("provider endpoints require HTTPS or loopback HTTP")
         if self.url.username is not None or self.url.password is not None:
             raise ValueError("provider endpoint URLs cannot contain credentials")
+        if self.url.query is not None:
+            raise ValueError("provider endpoint URLs cannot contain query parameters")
         if self.url.fragment is not None:
             raise ValueError("provider endpoint URLs cannot contain fragments")
         if any(

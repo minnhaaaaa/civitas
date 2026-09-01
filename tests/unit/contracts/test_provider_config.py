@@ -46,6 +46,11 @@ def test_http_provider_rejects_insecure_non_loopback_endpoint() -> None:
     assert str(transport.url) == "http://127.0.0.1:9000/mcp"
 
 
+def test_http_provider_rejects_query_credentials() -> None:
+    with pytest.raises(ValidationError, match="query parameters"):
+        HttpMCPTransport(url="https://inventory.example.com/mcp?token=secret")
+
+
 def test_configuration_rejects_duplicate_capability_bindings() -> None:
     provider = ProviderDefinition(
         provider_id="warehouse",
