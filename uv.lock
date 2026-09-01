@@ -150,6 +150,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "mcp" },
     { name = "networkx" },
@@ -174,6 +175,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.16,<2" },
     { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "mcp", specifier = ">=1.12,<2" },
     { name = "networkx", specifier = ">=3.4,<4" },
