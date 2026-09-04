@@ -209,8 +209,7 @@ button {
   width: max-content;
   max-width: 100%;
 }
-.hero h1 .hero-indent {
-  margin-left: 12%;
+.hero h1 span:nth-child(2) {
   color: var(--lime);
 }
 .hero h1 .hero-outline {
@@ -220,7 +219,6 @@ button {
 .hero-bottom {
   display: flex;
   width: min(720px, 90%);
-  margin-left: 12%;
   align-items: center;
   gap: clamp(24px, 5vw, 80px);
 }
@@ -365,8 +363,8 @@ button {
 }
 .jury-stamp {
   position: absolute;
-  right: 7%;
-  bottom: 4%;
+  right: 9%;
+  bottom: -18%;
   display: flex;
   width: 120px;
   aspect-ratio: 1;
@@ -454,7 +452,7 @@ button {
 .jury-copy h2,
 .closing-section h2 {
   margin: 0;
-  font: 400 clamp(55px, 7.8vw, 122px)/0.85 var(--display);
+  font: 400 clamp(44px, 5vw, 80px)/0.9 var(--display);
   letter-spacing: -0.065em;
   text-transform: uppercase;
 }
@@ -647,7 +645,7 @@ button {
 }
 .install-heading h2 {
   margin: 0;
-  font: 400 clamp(54px, 7.5vw, 118px) / 0.86 var(--display);
+  font: 400 clamp(42px, 4.8vw, 74px) / 0.9 var(--display);
   letter-spacing: -0.065em;
   text-transform: uppercase;
 }
@@ -1099,9 +1097,6 @@ button {
     margin-top: 23px;
     font-size: clamp(53px, 16.2vw, 88px);
   }
-  .hero h1 .hero-indent {
-    margin-left: 6%;
-  }
   .hero h1 .hero-outline {
     margin-left: 0;
     -webkit-text-stroke-width: 1.3px;
@@ -1131,6 +1126,9 @@ button {
     font-size: 9px;
   }
   .jury-stamp {
+    right: auto;
+    bottom: -12%;
+    left: -12%;
     width: 95px;
   }
   .jury-stamp strong {
@@ -1169,6 +1167,7 @@ button {
   }
   .section-heading h2 {
     margin: 32px 0;
+    font-size: clamp(30px, 7.8vw, 52px);
   }
   .section-heading > p:last-child {
     max-width: 42ch;
@@ -1194,7 +1193,7 @@ button {
   }
   .install-heading h2 {
     margin: 32px 0;
-    font-size: clamp(48px, 14vw, 76px);
+    font-size: clamp(30px, 7.8vw, 52px);
   }
   .install-terminal {
     width: calc(100% - 10px);
@@ -1222,7 +1221,7 @@ button {
     flex-direction: column;
   }
   .jury-copy h2 {
-    font-size: clamp(50px, 15vw, 78px);
+    font-size: clamp(38px, 10vw, 60px);
   }
   .integrity-score {
     height: 270px;
@@ -1267,7 +1266,7 @@ button {
     border-left: 0;
   }
   .closing-section h2 {
-    font-size: clamp(48px, 14vw, 72px);
+    font-size: clamp(27px, 7vw, 46px);
   }
   .closing-section h2 span {
     -webkit-text-stroke-width: 1.3px;
@@ -1304,6 +1303,9 @@ button {
     font-size: 8px;
   }
   .jury-stamp {
+    right: auto;
+    bottom: -15%;
+    left: -12%;
     width: 82px;
   }
   .agent-grid {
