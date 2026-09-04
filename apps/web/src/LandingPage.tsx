@@ -219,7 +219,7 @@ export function LandingPage() {
             </p>
             <h1>
               <span>Food buying</span>
-              <span className="hero-indent">that can</span>
+              <span>that can</span>
               <span className="hero-outline">prove itself.</span>
             </h1>
             <div className="hero-bottom">
